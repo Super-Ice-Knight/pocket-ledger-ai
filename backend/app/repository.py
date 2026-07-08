@@ -1,8 +1,25 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from datetime import datetime
 from .schemas import TransactionCreate, TransactionUpdate, BudgetCreate
+
+
+def encode_tags(tags: list[str]) -> str:
+    return json.dumps(tags, ensure_ascii=False)
+
+
+def decode_tags(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item) for item in data if str(item).strip()]
 
 
 def row_to_transaction(row: sqlite3.Row) -> dict:
@@ -15,6 +32,7 @@ def row_to_transaction(row: sqlite3.Row) -> dict:
         "occurred_at": row["occurred_at"],
         "note": row["note"],
         "raw_text": row["raw_text"],
+        "tags": decode_tags(row["tags"]),
         "created_at": row["created_at"],
     }
 
@@ -24,8 +42,8 @@ def create_transaction(conn: sqlite3.Connection, payload: TransactionCreate) -> 
     cursor = conn.execute(
         """
         INSERT INTO transactions
-            (amount_cents, type, category, account, occurred_at, note, raw_text, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (amount_cents, type, category, account, occurred_at, note, raw_text, tags, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.amount_cents,
@@ -35,6 +53,7 @@ def create_transaction(conn: sqlite3.Connection, payload: TransactionCreate) -> 
             payload.occurred_at.isoformat(),
             payload.note,
             payload.raw_text,
+            encode_tags(payload.tags),
             now,
         ),
     )
@@ -53,7 +72,7 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, payload: T
     conn.execute(
         """
         UPDATE transactions
-        SET amount_cents = ?, type = ?, category = ?, account = ?, occurred_at = ?, note = ?, raw_text = ?
+        SET amount_cents = ?, type = ?, category = ?, account = ?, occurred_at = ?, note = ?, raw_text = ?, tags = ?
         WHERE id = ?
         """,
         (
@@ -64,6 +83,7 @@ def update_transaction(conn: sqlite3.Connection, transaction_id: int, payload: T
             payload.occurred_at.isoformat(),
             payload.note,
             payload.raw_text,
+            encode_tags(payload.tags),
             transaction_id,
         ),
     )

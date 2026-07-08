@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: pocket-ledger-ai-backend
+    runtime: python
+    plan: free
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: POCKET_LEDGER_DB_PATH
+        value: /var/data/pocket_ledger.db
+      - key: OPENAI_COMPATIBLE_BASE_URL
+        value: https://api.openai.com/v1
+      - key: OPENAI_COMPATIBLE_MODEL
+        value: your-model-name
+      - key: OPENAI_COMPATIBLE_API_KEY
+        sync: false
+      - key: BACKUP_OPENAI_COMPATIBLE_BASE_URL
+        sync: false
+      - key: BACKUP_OPENAI_COMPATIBLE_MODEL
+        sync: false
+      - key: BACKUP_OPENAI_COMPATIBLE_API_KEY
+        sync: false
+      - key: AI_REQUEST_TIMEOUT_SECONDS
+        value: "45"
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://your-frontend-domain.vercel.app

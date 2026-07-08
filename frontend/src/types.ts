@@ -10,12 +10,14 @@ export interface Transaction {
   occurred_at: string;
   note: string;
   raw_text?: string | null;
+  tags: string[];
   created_at: string;
 }
 
 export interface ParseResult extends Omit<Transaction, "id" | "created_at"> {
   confidence: number;
   source: "model" | "local_rule" | "error_fallback";
+  provider: "primary" | "backup" | "local" | "fallback";
   missing_fields: string[];
   needs_review: boolean;
 }
@@ -44,5 +46,40 @@ export interface AdviceResponse {
   tone: AdviceTone;
   advice: string;
   source: "model" | "local_rule" | "error_fallback";
+  provider: "primary" | "backup" | "local" | "fallback";
 }
 
+export interface SettingsStatus {
+  openai_base_url: string;
+  openai_model: string;
+  api_key_configured: boolean;
+  primary_base_url: string;
+  primary_model: string;
+  primary_api_key_configured: boolean;
+  backup_base_url: string;
+  backup_model: string;
+  backup_api_key_configured: boolean;
+  backup_enabled: boolean;
+  ai_request_timeout_seconds: number;
+  database_file: string;
+}
+
+export interface AiSettingsPayload {
+  primary_base_url: string;
+  primary_model: string;
+  primary_api_key?: string | null;
+  backup_base_url: string;
+  backup_model: string;
+  backup_api_key?: string | null;
+  ai_request_timeout_seconds: number;
+}
+
+export interface AiProviderTestResult {
+  provider: "primary" | "backup";
+  configured: boolean;
+  ok: boolean;
+  base_url: string;
+  model: string;
+  latency_ms: number;
+  message: string;
+}

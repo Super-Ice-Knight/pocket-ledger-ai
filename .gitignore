@@ -19,3 +19,5 @@ frontend/.env.local
 output/
 tmp/
 选拔指南.pdf
+.impeccable/
+backend/package-lock.json

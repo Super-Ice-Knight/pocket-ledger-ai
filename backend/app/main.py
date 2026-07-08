@@ -5,8 +5,9 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from .ai import parse_with_model, monthly_advice
+from .ai import parse_with_model, monthly_advice, test_ai_providers
 from .database import init_db, seed_demo_data, get_connection
+from .runtime_settings import get_settings_status, save_runtime_ai_settings
 from .repository import (
     create_transaction,
     update_transaction,
@@ -25,8 +26,13 @@ from .schemas import (
     MonthlyStats,
     AdviceResponse,
     AdviceTone,
+    SettingsStatus,
+    AiSettingsUpdate,
+    AiProviderTestRequest,
+    AiProviderTestResult,
 )
 from .stats import monthly_stats, current_month
+from .config import get_settings
 
 
 @asynccontextmanager
@@ -40,7 +46,7 @@ app = FastAPI(title="Pocket Ledger AI", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=get_settings().allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,6 +56,21 @@ app.add_middleware(
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.get("/api/settings/public", response_model=SettingsStatus)
+def settings_public() -> SettingsStatus:
+    return get_settings_status()
+
+
+@app.put("/api/settings/ai", response_model=SettingsStatus)
+def update_ai_settings(payload: AiSettingsUpdate) -> SettingsStatus:
+    return save_runtime_ai_settings(payload)
+
+
+@app.post("/api/settings/ai/test", response_model=list[AiProviderTestResult])
+async def test_ai_settings(payload: AiProviderTestRequest) -> list[AiProviderTestResult]:
+    return await test_ai_providers(payload.slot)
 
 
 @app.post("/api/ai/parse-transaction", response_model=ParseResult)

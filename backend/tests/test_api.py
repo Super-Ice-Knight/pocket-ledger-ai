@@ -1,8 +1,10 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+import httpx
 from fastapi.testclient import TestClient
 
 from app.database import init_db, connect
+from app.config import get_settings
 from app.main import app
 from app.money import parse_yuan_to_cents
 from app.repository import create_transaction
@@ -18,6 +20,13 @@ def test_local_parser_handles_selection_prompt_sentence():
     assert result.needs_review is True
 
 
+def test_local_parser_resolves_relative_dates():
+    today = datetime.now().date()
+    assert local_parse("今天咖啡 24 块微信").occurred_at.date() == today
+    assert local_parse("昨天咖啡 24 块微信").occurred_at.date() == today - timedelta(days=1)
+    assert local_parse("前天咖啡 24 块微信").occurred_at.date() == today - timedelta(days=2)
+
+
 def test_transaction_can_be_created_and_retrieved(tmp_path: Path):
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -31,10 +40,12 @@ def test_transaction_can_be_created_and_retrieved(tmp_path: Path):
                 account="微信",
                 occurred_at=datetime.now(),
                 note="午餐",
+                tags=["宿舍", "高频", "高频"],
             ),
         )
     assert created["amount_cents"] == 1990
     assert created["category"] == "餐饮"
+    assert created["tags"] == ["宿舍", "高频"]
 
 
 def test_health_endpoint():
@@ -43,3 +54,170 @@ def test_health_endpoint():
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
+
+def test_public_settings_do_not_expose_api_key():
+    client = TestClient(app)
+    response = client.get("/api/settings/public")
+    assert response.status_code == 200
+    body = response.json()
+    assert "api_key" not in body
+    assert "api_key_configured" in body
+
+
+def test_ai_settings_can_be_saved_without_exposing_keys(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "settings.db"))
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+
+    response = client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://apihub.agnes-ai.com/v1",
+            "primary_model": "agnes-2.0-flash",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "https://api.siliconflow.cn/v1",
+            "backup_model": "deepseek-ai/DeepSeek-V4-Pro",
+            "backup_api_key": "backup-secret",
+            "ai_request_timeout_seconds": 60,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["primary_model"] == "agnes-2.0-flash"
+    assert body["backup_model"] == "deepseek-ai/DeepSeek-V4-Pro"
+    assert body["primary_api_key_configured"] is True
+    assert body["backup_api_key_configured"] is True
+    assert "primary-secret" not in response.text
+    assert "backup-secret" not in response.text
+
+    public_response = client.get("/api/settings/public")
+    assert public_response.json()["primary_base_url"] == "https://apihub.agnes-ai.com/v1"
+
+
+def test_ai_parse_tries_backup_provider_after_primary_failure(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "backup.db"))
+    get_settings.cache_clear()
+    init_db()
+    calls: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"amount_cents":3600,"type":"expense","category":"books",'
+                                '"account":"alipay","occurred_at":"2026-07-07T12:00:00",'
+                                '"note":"买书","tags":["小额高频"],"confidence":0.93,"missing_fields":[]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            calls.append(json["model"])
+            if json["model"] == "primary-model":
+                raise httpx.TimeoutException("primary timed out")
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FakeClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "https://backup.example/v1",
+            "backup_model": "backup-model",
+            "backup_api_key": "backup-secret",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.post("/api/ai/parse-transaction", json={"text": "今天买书36块支付宝"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == ["primary-model", "backup-model"]
+    assert body["source"] == "model"
+    assert body["provider"] == "backup"
+    assert body["category"] == "学习"
+    assert body["account"] == "支付宝"
+    assert body["tags"] == ["小额高频"]
+
+
+def test_ai_provider_test_reports_status_without_exposing_keys(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "provider_test.db"))
+    get_settings.cache_clear()
+    init_db()
+    calls: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"choices": [{"message": {"content": '{"ok":true}'}}]}
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            calls.append(json["model"])
+            if json["model"] == "backup-model":
+                request = httpx.Request("POST", url)
+                response = httpx.Response(400, request=request, text='{"message":"bad model"}')
+                raise httpx.HTTPStatusError("bad model", request=request, response=response)
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FakeClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "https://backup.example/v1",
+            "backup_model": "backup-model",
+            "backup_api_key": "backup-secret",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.post("/api/settings/ai/test", json={"slot": "all"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == ["primary-model", "backup-model"]
+    assert [item["provider"] for item in body] == ["primary", "backup"]
+    assert body[0]["ok"] is True
+    assert body[1]["ok"] is False
+    assert body[1]["configured"] is True
+    assert "primary-secret" not in response.text
+    assert "backup-secret" not in response.text

@@ -1,4 +1,4 @@
-import type { AdviceResponse, AdviceTone, BudgetPayload, MonthlyStats, ParseResult, Transaction } from "./types";
+import type { AdviceResponse, AdviceTone, AiProviderTestResult, AiSettingsPayload, BudgetPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -54,5 +54,19 @@ export const api = {
   monthlyAdvice(month: string, tone: AdviceTone) {
     return request<AdviceResponse>(`/api/ai/monthly-advice?month=${month}&tone=${tone}`);
   },
+  settingsStatus() {
+    return request<SettingsStatus>("/api/settings/public");
+  },
+  updateAiSettings(payload: AiSettingsPayload) {
+    return request<SettingsStatus>("/api/settings/ai", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  },
+  testAiProviders(slot: "all" | "primary" | "backup" = "all") {
+    return request<AiProviderTestResult[]>("/api/settings/ai/test", {
+      method: "POST",
+      body: JSON.stringify({ slot }),
+    });
+  },
 };
-
