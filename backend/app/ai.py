@@ -295,31 +295,129 @@ async def monthly_advice(stats: dict, tone: AdviceTone) -> dict:
     providers = runtime.configured_providers()
     fallback = local_advice(stats, tone)
     if not providers:
-        return {"tone": tone, "advice": fallback, "source": "local_rule", "provider": "local"}
+        return {**fallback, "tone": tone, "source": "local_rule", "provider": "local"}
     for provider in providers:
         try:
-            advice = await request_chat_completion(
+            content = await request_chat_completion(
                 provider=provider,
                 timeout=runtime.ai_request_timeout_seconds,
                 messages=[
-                    {"role": "system", "content": "你是个人财务建议助手。输出一句 40 字以内的中文建议。不要编造数字。"},
+                    {
+                        "role": "system",
+                        "content": (
+                            "你是“口袋记账 AI 版”的个人财务分析师，服务对象是学生和年轻用户。"
+                            "你要像一个克制但有判断力的预算教练：基于账单统计说清楚钱花在哪里、预算风险在哪里、下一步怎么做。"
+                            "不要编造输入里没有的数字，不要提供投资建议，不要使用空泛鸡汤。"
+                            "tone=sharp 时可以直接、有一点毒舌，但不能羞辱用户；tone=warm 时温和具体。"
+                            "只返回 JSON，不要 Markdown。字段必须是："
+                            "headline(string, 28字以内，一句话结论), "
+                            "detail(string, 120到220字，给出具体财务分析), "
+                            "action_items(array, 2到3条，每条24字以内的行动建议)。"
+                        ),
+                    },
                     {"role": "user", "content": json.dumps({"stats": stats, "tone": tone}, ensure_ascii=False)},
                 ],
-                temperature=0.5,
+                response_format={"type": "json_object"},
+                temperature=0.45,
             )
-            return {"tone": tone, "advice": advice.strip()[:80], "source": "model", "provider": provider.slot}
+            return {
+                **normalize_advice_payload(json.loads(content), fallback),
+                "tone": tone,
+                "source": "model",
+                "provider": provider.slot,
+            }
         except Exception:
             continue
-    return {"tone": tone, "advice": fallback, "source": "error_fallback", "provider": "fallback"}
+    return {**fallback, "tone": tone, "source": "error_fallback", "provider": "fallback"}
 
 
-def local_advice(stats: dict, tone: AdviceTone) -> str:
+def normalize_advice_payload(payload: dict, fallback: dict) -> dict:
+    headline = str(payload.get("headline") or payload.get("advice") or fallback["headline"]).strip()
+    detail = str(payload.get("detail") or fallback["detail"]).strip()
+    raw_items = payload.get("action_items") or payload.get("actions") or fallback["action_items"]
+    if not isinstance(raw_items, list):
+        raw_items = fallback["action_items"]
+    action_items = [str(item).strip()[:24] for item in raw_items if str(item).strip()][:3]
+    if not action_items:
+        action_items = fallback["action_items"]
+    return {
+        "advice": headline[:80],
+        "headline": headline[:80],
+        "detail": detail[:360],
+        "action_items": action_items,
+    }
+
+
+def local_advice(stats: dict, tone: AdviceTone) -> dict:
     usage = stats.get("budget_usage_ratio", 0)
-    expense = stats.get("expense_cents", 0) / 100
+    expense = cents(stats.get("expense_cents", 0))
+    income = cents(stats.get("income_cents", 0))
+    remaining = cents(stats.get("budget_remaining_cents", 0))
+    top_category = first_name(stats.get("category_breakdown"))
+    top_account = first_name(stats.get("account_breakdown"))
+    active_days = max(len(stats.get("daily_trend") or []), 1)
+    daily_average = expense / active_days
     if not stats.get("budget_limit_cents"):
-        return "先设一个月度预算，不然消费复盘只能靠感觉。"
+        headline = "先把预算线立起来"
+        detail = (
+            f"本月已记录支出 {expense:.0f} 元、收入 {income:.0f} 元，但还没有设置月度预算。"
+            f"目前最高支出分类是{top_category}，主要付款账户是{top_account}。"
+            "没有预算线时，系统只能告诉你钱流向哪里，不能判断节奏是否危险。"
+        )
+        return advice_payload(headline, detail, ["设置月度预算", "先复盘最高分类", "保持每天记账"])
     if usage >= 1:
-        return f"本月已经花到 {expense:.0f} 元，预算线被你踩过去了，接下来每一笔都要问值不值。" if tone == "sharp" else "本月已经超出预算，建议先暂停非必要消费，把剩余额度留给刚需。"
+        headline = "预算线已经被踩穿"
+        detail = (
+            f"本月支出 {expense:.0f} 元，已经超过预算，当前剩余额度为 {remaining:.0f} 元。"
+            f"最需要盯住的是{top_category}，日均支出约 {daily_average:.0f} 元。"
+            + (
+                "接下来不是优化体验，是先止血：每一笔非刚需都要问一次值不值。"
+                if tone == "sharp"
+                else "接下来建议先暂停非必要消费，把额度留给餐饮、交通等刚需。"
+            )
+        )
+        return advice_payload(headline, detail, ["暂停非必要消费", f"压低{top_category}支出", "每天看一次预算"])
     if usage >= 0.8:
-        return "预算快见底了，奶茶和随机购物先收一收，别让月底变成求生模式。" if tone == "sharp" else "预算使用已接近上限，接下来优先保留餐饮、交通等必要支出。"
-    return "节奏还稳，但别被低价小单偷走预算，零碎消费最会伪装。" if tone == "sharp" else "本月预算状态健康，可以继续保持记录和每周复盘。"
+        headline = "预算进入警戒区"
+        detail = (
+            f"预算已使用 {usage:.0%}，本月支出 {expense:.0f} 元，剩余约 {remaining:.0f} 元。"
+            f"最高分类是{top_category}，主要账户是{top_account}，日均支出约 {daily_average:.0f} 元。"
+            + (
+                "现在再放任小额高频消费，月底就会很难看。"
+                if tone == "sharp"
+                else "接下来把支出优先留给必要项目，预算仍有机会守住。"
+            )
+        )
+        return advice_payload(headline, detail, ["减少高频小单", f"检查{top_category}明细", "保留刚需额度"])
+    headline = "预算节奏还算稳定"
+    detail = (
+        f"本月支出 {expense:.0f} 元，预算使用 {usage:.0%}，剩余约 {remaining:.0f} 元。"
+        f"最高分类是{top_category}，主要账户是{top_account}，日均支出约 {daily_average:.0f} 元。"
+        + (
+            "别被低价小单偷走预算，真正容易失控的往往不是大额消费，而是每天都觉得无所谓的小支出。"
+            if tone == "sharp"
+            else "整体节奏健康，继续保持记录，并每周看一次分类变化即可。"
+        )
+    )
+    return advice_payload(headline, detail, ["继续保持记录", "每周复盘分类", "留意小额高频"])
+
+
+def advice_payload(headline: str, detail: str, action_items: list[str]) -> dict:
+    return {
+        "advice": headline,
+        "headline": headline,
+        "detail": detail,
+        "action_items": action_items,
+    }
+
+
+def cents(value: object) -> float:
+    return int(value or 0) / 100
+
+
+def first_name(items: object) -> str:
+    if isinstance(items, list) and items:
+        first = items[0]
+        if isinstance(first, dict):
+            return str(first.get("name") or "暂无")
+    return "暂无"

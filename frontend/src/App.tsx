@@ -171,19 +171,35 @@ function App() {
   async function refresh() {
     setError("");
     try {
-      const [nextStats, nextTransactions, nextAdvice] = await Promise.all([
+      const [nextStats, nextTransactions] = await Promise.all([
         api.monthlyStats(month),
         api.listTransactions(month),
-        api.monthlyAdvice(month, tone),
       ]);
       setStats(nextStats);
       setTransactions(nextTransactions);
-      setAdvice(nextAdvice);
       if (nextStats.budget_limit_cents) {
         setBudgetYuan(String(nextStats.budget_limit_cents / 100));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
+    }
+  }
+
+  async function refreshAdvice() {
+    setAdvice(null);
+    try {
+      const nextAdvice = await api.monthlyAdvice(month, tone);
+      setAdvice(nextAdvice);
+    } catch {
+      setAdvice({
+        tone,
+        advice: "AI 建议暂时不可用",
+        headline: "AI 建议暂时不可用",
+        detail: "本月基础数据已经加载，但建议接口没有返回。可以先查看预算、分类和流水，稍后再重新尝试生成分析。",
+        action_items: ["检查后端状态", "确认 API 配置"],
+        source: "error_fallback",
+        provider: "fallback",
+      });
     }
   }
 
@@ -205,6 +221,10 @@ function App() {
 
   useEffect(() => {
     refresh();
+  }, [month]);
+
+  useEffect(() => {
+    refreshAdvice();
   }, [month, tone]);
 
   useEffect(() => {
@@ -550,7 +570,10 @@ function OverviewPage({
             <Brain size={20} />
             <span>AI 财务点评</span>
           </div>
-          <p>{advice?.advice || "正在生成建议..."}</p>
+          <div className="advice-copy">
+            <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
+            <p>{advice?.detail || "AI 正在根据本月收入、支出、预算、分类和账户分布生成详细分析。"}</p>
+          </div>
           <div className="segmented">
             <button className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
             <button className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
@@ -798,7 +821,15 @@ function BudgetPage({
           <Brain size={20} />
           <span>预算建议</span>
         </div>
-        <p>{advice?.advice || "正在生成建议..."}</p>
+        <div className="advice-copy">
+          <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
+          <p>{advice?.detail || "AI 正在结合预算使用率、最高分类、主要账户和日均支出生成建议。"}</p>
+        </div>
+        <div className="action-list">
+          {(advice?.action_items?.length ? advice.action_items : ["等待分析结果", "先保持记账"]).map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
         <div className="segmented">
           <button className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
           <button className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>

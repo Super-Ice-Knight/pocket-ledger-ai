@@ -98,6 +98,9 @@ class MonthlyStats(BaseModel):
 class AdviceResponse(BaseModel):
     tone: AdviceTone
     advice: str
+    headline: str
+    detail: str
+    action_items: list[str] = Field(default_factory=list, max_length=4)
     source: Literal["model", "local_rule", "error_fallback"]
     provider: ProviderSlot = "local"
 

@@ -75,10 +75,26 @@
 
 ## GET /api/ai/monthly-advice
 
-根据月度统计和预算生成建议，参数：
+根据月度统计和预算生成 AI 财务分析，参数：
 
 - `month=YYYY-MM`
 - `tone=sharp` 或 `tone=warm`
+
+返回：
+
+```json
+{
+  "tone": "sharp",
+  "advice": "预算进入警戒区",
+  "headline": "预算进入警戒区",
+  "detail": "本月支出 301 元，预算使用 17%，剩余约 1498 元。最高分类是学习，主要账户是支付宝，日均支出约 301 元。别被低价小单偷走预算。",
+  "action_items": ["继续保持记录", "每周复盘分类", "留意小额高频"],
+  "source": "model",
+  "provider": "primary"
+}
+```
+
+`advice` 保留为一句话摘要，便于旧前端兼容；新界面主要使用 `headline`、`detail` 和 `action_items`。模型调用和 AI 快记共用同一套主备 OpenAI 兼容接口。主备都失败时，后端用预算使用率、最高分类、主要账户、日均支出等本地统计生成结构化兜底分析。
 
 ## GET /api/settings/public
 

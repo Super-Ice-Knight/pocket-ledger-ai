@@ -45,6 +45,9 @@ export interface BudgetPayload {
 export interface AdviceResponse {
   tone: AdviceTone;
   advice: string;
+  headline: string;
+  detail: string;
+  action_items: string[];
   source: "model" | "local_rule" | "error_fallback";
   provider: "primary" | "backup" | "local" | "fallback";
 }

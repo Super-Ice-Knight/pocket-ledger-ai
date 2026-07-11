@@ -221,3 +221,89 @@ def test_ai_provider_test_reports_status_without_exposing_keys(tmp_path: Path, m
     assert body[1]["configured"] is True
     assert "primary-secret" not in response.text
     assert "backup-secret" not in response.text
+
+
+def test_monthly_advice_returns_structured_local_payload(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "advice_local.db"))
+    monkeypatch.delenv("OPENAI_COMPATIBLE_API_KEY", raising=False)
+    monkeypatch.setenv("OPENAI_COMPATIBLE_MODEL", "your-model-name")
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+
+    response = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "local_rule"
+    assert body["provider"] == "local"
+    assert body["advice"] == body["headline"]
+    assert body["detail"]
+    assert len(body["action_items"]) >= 2
+
+
+def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "advice_model.db"))
+    get_settings.cache_clear()
+    init_db()
+    calls: list[str] = []
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"headline":"咖啡预算正在偷跑",'
+                                '"detail":"本月餐饮和饮品支出偏高，预算还没有爆掉，但小额高频已经开始侵蚀剩余额度。接下来需要盯住每天的随手消费。",'
+                                '"action_items":["减少饮品频率","复盘餐饮明细"]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            calls.append(json["model"])
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FakeClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "",
+            "backup_model": "",
+            "backup_api_key": "",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == ["primary-model"]
+    assert body["source"] == "model"
+    assert body["provider"] == "primary"
+    assert body["headline"] == "咖啡预算正在偷跑"
+    assert "小额高频" in body["detail"]
+    assert body["action_items"] == ["减少饮品频率", "复盘餐饮明细"]
+    assert "primary-secret" not in response.text
