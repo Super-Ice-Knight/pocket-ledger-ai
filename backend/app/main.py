@@ -53,6 +53,16 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root() -> dict:
+    return {
+        "name": "Pocket Ledger AI API",
+        "status": "running",
+        "health": "/api/health",
+        "docs": "/docs",
+    }
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
