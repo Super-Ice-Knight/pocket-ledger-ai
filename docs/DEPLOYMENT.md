@@ -56,16 +56,29 @@ Start Command: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check Path: /api/health
 ```
 
-建议添加持久磁盘：
+如果使用免费 Web Service 且不添加持久磁盘，数据库路径使用：
+
+```env
+POCKET_LEDGER_DB_PATH=data/pocket_ledger.db
+```
+
+如果升级到支持持久磁盘的实例，可以添加持久磁盘：
 
 ```text
 Mount Path: /var/data
 ```
 
-后端环境变量：
+并改用：
 
 ```env
 POCKET_LEDGER_DB_PATH=/var/data/pocket_ledger.db
+```
+
+后端环境变量：
+
+```env
+POCKET_LEDGER_DB_PATH=data/pocket_ledger.db
+PYTHON_VERSION=3.11.9
 OPENAI_COMPATIBLE_API_KEY=
 OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
 OPENAI_COMPATIBLE_MODEL=your-model-name
@@ -128,6 +141,16 @@ CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://your-fr
 - 后端是否启动，`/api/health` 是否可访问。
 - 后端 `CORS_ALLOWED_ORIGINS` 是否包含前端域名。
 
+### pydantic-core 构建失败
+
+如果 Render 日志显示默认使用 Python `3.14.x`，并在安装 `pydantic-core` 时出现 `metadata-generation-failed` 或 `maturin` 错误，把后端环境变量加上：
+
+```env
+PYTHON_VERSION=3.11.9
+```
+
+Render 官方说明当前新服务默认 Python 可能是 `3.14.3`，而本项目本地验证版本是 Python `3.11.9`。锁定版本后重新部署即可。
+
 ### 设置页显示 Key 未配置
 
 可能原因：
@@ -139,4 +162,3 @@ CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://your-fr
 ### 备用模型没有触发
 
 备用模型只在主模型请求失败、超时或返回不可用时触发。低置信度不会自动切换，因为低置信度可能来自用户输入缺字段，而不是模型服务故障。
-

@@ -8,7 +8,9 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: POCKET_LEDGER_DB_PATH
-        value: /var/data/pocket_ledger.db
+        value: data/pocket_ledger.db
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: OPENAI_COMPATIBLE_BASE_URL
         value: https://api.openai.com/v1
       - key: OPENAI_COMPATIBLE_MODEL
