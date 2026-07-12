@@ -16,18 +16,16 @@
 - [ ] 仓库不包含 `.env`、`.db`、`.venv`、`node_modules`、`dist`
 - [ ] GitHub 中不存在真实 Key 或本机绝对路径
 
-最终基线：18 项后端测试，前端生产构建通过。
+最终基线：20 项后端测试，前端生产构建通过。
 
 ## Render 环境变量
 
 - [ ] `PYTHON_VERSION=3.11.9`
-- [ ] `OPENAI_COMPATIBLE_BASE_URL=https://apihub.agnes-ai.com/v1`
-- [ ] `OPENAI_COMPATIBLE_MODEL=agnes-2.0-flash`
+- [ ] `OPENAI_COMPATIBLE_BASE_URL=https://api.groq.com/openai/v1`
+- [ ] `OPENAI_COMPATIBLE_MODEL=qwen/qwen3.6-27b`
 - [ ] `OPENAI_COMPATIBLE_API_KEY` 已通过 Secret 填写
-- [ ] `BACKUP_OPENAI_COMPATIBLE_BASE_URL=https://api.siliconflow.cn/v1`
-- [ ] `BACKUP_OPENAI_COMPATIBLE_MODEL=deepseek-ai/DeepSeek-V4-Flash`
-- [ ] `BACKUP_OPENAI_COMPATIBLE_API_KEY` 已通过 Secret 填写
-- [ ] `AI_REQUEST_TIMEOUT_SECONDS=45`
+- [ ] `BACKUP_OPENAI_COMPATIBLE_*` 未配置，`backup_enabled=false`
+- [ ] `AI_REQUEST_TIMEOUT_SECONDS=10`
 - [ ] `RUNTIME_AI_SETTINGS_WRITABLE=false`
 - [ ] `CORS_ALLOWED_ORIGINS=https://pocket-ledger-ai.vercel.app`
 
@@ -36,12 +34,14 @@
 - [ ] `/api/health` 返回 200
 - [ ] `/api/settings/public` 显示 `runtime_settings_writable=false`
 - [ ] 设置页显示“线上只读”，不能输入或保存 Key
-- [ ] 主备接口测试至少一个成功，响应不包含 Key
-- [ ] AI 快记至少一次显示“主模型”或“备用模型”
+- [ ] Groq 主接口测试成功，响应不包含 Key
+- [ ] AI 快记至少一次显示“主模型”
 - [ ] AI 财务点评至少一次显示真实 provider
-- [ ] 主备不可用时测试返回 `error_fallback`
+- [ ] 所有已配置 Provider 不可用时测试返回 `error_fallback`
 - [ ] Vercel 无 CORS 或 `Failed to fetch` 错误
 - [ ] 冷启动期间显示“后端正在唤醒”，不会闪现零统计
+
+2026-07-13 线上基线：`/api/health` 170 ms；Groq 服务端测试 917 ms；普通快记 3.64 秒；“昨天兼职收入两千元，银行卡到账”4.87 秒并返回 `amount_cents=200000`、`provider=primary`；结构化月度点评 5.25 秒并返回 3 条行动建议。
 
 ## 核心流程
 
@@ -49,6 +49,7 @@
 - [ ] 输入 `12.60` 后提交值为 1260 分
 - [ ] “7月11日买3杯咖啡花50元”识别为 5000 分
 - [ ] 缺金额输入进入 `missing_fields`
+- [ ] 同时包含收入和支出的句子拆成两笔输入，不在一笔草稿中抵消
 - [ ] 确认入账后流水更新
 - [ ] 删除前出现确认对话框，取消后数据不变
 - [ ] 图表旁存在分类、账户、日均和预算文字

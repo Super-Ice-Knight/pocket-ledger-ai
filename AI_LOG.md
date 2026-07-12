@@ -7,7 +7,7 @@
 - AI 协作：Codex / ChatGPT
 - 前端：Vite、React、TypeScript、Tailwind CSS、Recharts、Phosphor Icons
 - 后端：FastAPI、SQLite、Pydantic、httpx
-- AI 接口：OpenAI 兼容 Chat Completions，主模型 Agnes，备用模型硅基流动
+- AI 接口：OpenAI 兼容 Chat Completions；当前线上主模型为 Groq `qwen/qwen3.6-27b`，代码支持可选备用 Provider
 - 验证：pytest、TypeScript 构建、Playwright
 - 版本与部署：Git、GitHub、Render、Vercel
 
@@ -67,6 +67,7 @@ missing_fields。AI 只返回待确认草稿，不能直接写数据库。
 | SQLite | 采纳 | 单用户演示足够，文件持久化且易解释 |
 | 金额保存整数分 | 采纳 | 避免 `0.1 + 0.2` 浮点误差 |
 | 主模型 + 备用模型 | 采纳 | 外部 API 故障时仍可继续尝试 |
+| 为了“有备用”保留已知慢接口 | 拒绝 | 串行超时会直接破坏快记体验 |
 | 本地规则兜底 | 采纳 | 保证可解释性和演示连续性 |
 | AI 自动入账 | 拒绝 | 模型可能出错，必须由用户确认 |
 | Streamlit | 拒绝 | 无法达到目标产品质感 |
@@ -107,7 +108,41 @@ Render 使用 Python 3.11.9 后依赖安装成功，`/api/health` 返回 `{"ok":
 
 这次 Debug 的价值在于：AI 没有只给“升级 pip”这种表面建议，而是根据日志定位到 Python ABI、wheel 和 Rust 源码构建之间的关系。
 
-## 7. 最终优化中的问题发现
+## 7. 真实 Debug：线上 AI 从一分钟优化到秒级
+
+### 现象
+
+本地 Agnes 与硅基流动都曾成功返回模型结果，但部署到 Render Oregon 后，设置页测试出现 4–10 秒甚至更高延迟，AI 快记经常等待很久后进入本地兜底。仅凭“免费实例会休眠”无法解释服务已经唤醒后仍然缓慢。
+
+### 诊断
+
+1. 先预热 Render，再分别测健康接口、设置接口、Provider 测试和真实快记。
+2. 健康接口约 184 ms、设置接口约 192 ms，说明浏览器到 Render 和 FastAPI 基础响应正常。
+3. `POST /api/settings/ai/test` 使用 FastAPI 内部 `perf_counter` 包围模型请求，因此返回的 `latency_ms` 不包含用户浏览器网络。
+4. 实测 Agnes 在 45.2 秒后 `ReadTimeout`，硅基流动成功也需要 21.1 秒；一次真实快记等待 50.6 秒后才由备用模型返回。
+5. 交换主备顺序仍不能稳定解决，原句重放曾耗时 64.9 秒并进入 `error_fallback`。根因是 Render Oregon 到两家亚洲 Provider 的链路和服务延迟，而不是前端渲染。
+
+### 方案演进
+
+- 第一阶段：Agnes 作为主模型，证明 OpenAI 兼容接口可接入。
+- 第二阶段：硅基流动作为备用；通过 `/models` 将错误 ID `deepseekv4-flash` 修正为 `deepseek-ai/DeepSeek-V4-Flash`，证明主备切换有效。
+- 第三阶段：部署后发现地理链路延迟，拒绝继续靠放宽超时掩盖问题。
+- 第四阶段：迁移到 Groq。第一次把模型名写成 `qwen3.6-27b`，后端在 221 ms 返回 `HTTP 404 model_not_found`；错误是缺少命名空间，不是 Key 无效。修正为 `qwen/qwen3.6-27b` 后连接成功。
+- 最终策略：线上只启用经过验证的 Groq 主模型，超时收紧为 10 秒；备用槽位保留在代码中，但未验证的慢 Provider 不进入公开演示关键链路。
+
+### 最终回归
+
+2026-07-13 在公开 Render 服务上复测：
+
+- `/api/health`：170 ms。
+- Groq 服务端 Provider 测试：917 ms。
+- “今天中午咖啡花了24元，微信付的”：3.64 秒，返回 2400 分、`provider=primary`。
+- “昨天兼职收入两千元，银行卡到账”：4.87 秒，返回 200000 分、收入、银行卡、`provider=primary`。
+- 首轮月度点评验收连续进入 `error_fallback`。定位到长输出会触发 Qwen 推理或附带包装文本后，为 Groq Qwen 请求增加 `reasoning_effort=none`，并用 `json.JSONDecoder` 提取合法对象；部署回归后点评在 5.25 秒返回 `source=model, provider=primary` 和 3 条行动建议。
+
+这个过程同时暴露了一个测试边界：连接测试只证明 HTTP 请求成功，真实快记还要通过 JSON 解析、字段归一化和 Pydantic 校验，因此两者都必须验收。
+
+## 8. 最终优化中的问题发现
 
 交付前审查没有继续堆功能，而是发现并修复了三个真实风险：
 
@@ -128,12 +163,13 @@ Render 使用 Python 3.11.9 后依赖安装成功，`/api/health` 返回 `{"ok":
 
 旧线上设置接口没有登录保护，任何人都可以修改模型配置。新增 `RUNTIME_AI_SETTINGS_WRITABLE`：本地默认可写，Render 演示环境关闭写入，Key 只通过服务器环境变量配置。测试保证只读环境返回 `403`，公开响应不包含 Key。
 
-## 8. 验收证据
+## 9. 验收证据
 
-- 后端：18 项 pytest 行为测试通过。
+- 后端：20 项 pytest 行为测试通过。
 - 前端：TypeScript 与 Vite 生产构建通过。
 - 金额：浏览器输入 `50.` 保留文本并提示补全；输入 `12.60` 后实际提交 `1260` 分。
-- 主备模型：本机实测主模型失败后由备用模型返回结构化财务点评，界面显示“备用模型”。
+- 主备机制：早期本机实测 Agnes 失败后由硅基流动返回结构化结果；最终线上因延迟审查改为 Groq 单主模型，Provider 测试 917 ms。
+- 中文金额：线上模型实测“两千元”解析为 200000 分；本地确定性兜底仍只承诺阿拉伯数字。
 - 双模型失败：测试确认依次尝试主、备接口后返回 `source=error_fallback`。
 - 安全：设置状态和接口测试不回显真实 Key，公开只读模式禁止写入。
 - 响应式：`1440×900` 与 `390×844` 无横向溢出；手机首屏可看到快记输入和解析按钮。
@@ -145,7 +181,7 @@ Render 使用 Python 3.11.9 后依赖安装成功，`/api/health` 返回 `{"ok":
 - https://pocket-ledger-ai.onrender.com/
 - https://github.com/Super-Ice-Knight/pocket-ledger-ai
 
-## 9. 协作能力总结
+## 10. 协作能力总结
 
 AI 在这个项目中负责读取任务、提出方案、生成与修改代码、构造测试、分析日志和执行浏览器回归。我负责判断产品方向、否决不符合目标的方案、确认实现边界、检查来源标记，并要求每项核心能力能够在答辩中解释。
 
