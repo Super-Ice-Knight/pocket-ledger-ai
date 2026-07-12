@@ -65,6 +65,7 @@ export interface SettingsStatus {
   backup_enabled: boolean;
   ai_request_timeout_seconds: number;
   database_file: string;
+  runtime_settings_writable: boolean;
 }
 
 export interface AiSettingsPayload {

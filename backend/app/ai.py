@@ -6,12 +6,13 @@ import re
 from time import perf_counter
 import httpx
 from .runtime_settings import AiProvider, get_runtime_ai_settings
-from .money import parse_yuan_to_cents, MoneyParseError
+from .money import extract_transaction_amount_cents, MoneyParseError
 from .schemas import ParseResult, AdviceTone, AiProviderTestResult, AiProviderTestSlot
 
 
 CATEGORY_KEYWORDS = {
-    "餐饮": ["吃", "饭", "餐", "咖啡", "奶茶", "疯狂星期四", "食堂", "外卖", "早餐", "午餐", "晚餐"],
+    "饮品": ["咖啡", "奶茶", "饮料", "茶饮", "果汁"],
+    "餐饮": ["吃", "饭", "餐", "疯狂星期四", "食堂", "外卖", "早餐", "午餐", "晚餐"],
     "交通": ["地铁", "公交", "打车", "出租", "高铁", "火车", "机票", "共享单车"],
     "娱乐": ["电影", "游戏", "演唱会", "ktv", "KTV", "娱乐", "会员"],
     "学习": ["书", "课程", "资料", "考试", "网课", "打印", "文具"],
@@ -37,10 +38,9 @@ CATEGORY_ALIASES = {
     "资料": "学习",
     "food": "餐饮",
     "meal": "餐饮",
-    "drink": "餐饮",
-    "drinks": "餐饮",
-    "beverage": "餐饮",
-    "饮品": "餐饮",
+    "drink": "饮品",
+    "drinks": "饮品",
+    "beverage": "饮品",
     "transport": "交通",
     "transportation": "交通",
     "shopping": "购物",
@@ -61,12 +61,15 @@ ACCOUNT_ALIASES = {
     "cash": "现金",
 }
 
+CANONICAL_CATEGORIES = set(CATEGORY_KEYWORDS) | {"兼职", "其他"}
+CANONICAL_ACCOUNTS = set(ACCOUNT_KEYWORDS) | {"未指定"}
+
 
 def local_parse(text: str) -> ParseResult:
     missing: list[str] = []
     occurred_at = detect_occurred_at(text)
     try:
-        amount_cents = parse_yuan_to_cents(text)
+        amount_cents = extract_transaction_amount_cents(text)
     except MoneyParseError:
         amount_cents = 0
         missing.append("amount_cents")
@@ -112,18 +115,20 @@ def normalize_category(value: object, fallback: str) -> str:
     category = str(value or "").strip()
     if not category:
         return fallback
-    if category in CATEGORY_KEYWORDS or category in ["兼职", "其他"]:
-        return category
-    return CATEGORY_ALIASES.get(category.lower(), CATEGORY_ALIASES.get(category, category))
+    normalized = CATEGORY_ALIASES.get(category.lower(), CATEGORY_ALIASES.get(category, category))
+    if normalized in CANONICAL_CATEGORIES:
+        return normalized
+    return fallback if fallback in CANONICAL_CATEGORIES else "其他"
 
 
 def normalize_account(value: object, fallback: str) -> str:
     account = str(value or "").strip()
     if not account:
         return fallback
-    if account in ACCOUNT_KEYWORDS:
-        return account
-    return ACCOUNT_ALIASES.get(account.lower(), ACCOUNT_ALIASES.get(account, account))
+    normalized = ACCOUNT_ALIASES.get(account.lower(), ACCOUNT_ALIASES.get(account, account))
+    if normalized in CANONICAL_ACCOUNTS:
+        return normalized
+    return fallback if fallback in CANONICAL_ACCOUNTS else "未指定"
 
 
 def build_note(text: str, category: str, account: str) -> str:

@@ -57,6 +57,26 @@ button {
   cursor: pointer;
 }
 
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 3px solid rgb(39 111 121 / 0.42);
+  outline-offset: 3px;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.mobile-header,
+.mobile-nav {
+  display: none;
+}
+
 .app-root {
   min-height: 100dvh;
   color: var(--ink);
@@ -607,6 +627,16 @@ textarea:focus {
   font-weight: 800;
 }
 
+.provider-badge {
+  margin-left: auto;
+  border-radius: 999px;
+  background: rgb(220 239 240 / 0.86);
+  color: var(--accent-ink);
+  padding: 6px 9px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .advice-panel {
   display: grid;
   align-content: space-between;
@@ -840,6 +870,12 @@ textarea {
   width: 100%;
   min-height: 46px;
   padding: 0 13px;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .wide,
@@ -1149,6 +1185,29 @@ textarea {
   gap: 13px;
 }
 
+.readonly-notice {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid rgb(39 111 121 / 0.24);
+  border-radius: 16px;
+  background: rgb(220 239 240 / 0.62);
+  color: var(--accent-ink);
+  padding: 13px;
+}
+
+.readonly-notice div {
+  display: grid;
+  gap: 4px;
+}
+
+.readonly-notice span {
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .settings-group,
 .settings-actions,
 .provider-test-list,
@@ -1273,6 +1332,125 @@ textarea {
   padding: 12px 14px;
 }
 
+.loading-state,
+.recovery-state {
+  min-height: 420px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 28px;
+  text-align: center;
+}
+
+.loading-copy,
+.recovery-state > div {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.loading-copy h2,
+.recovery-state h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.loading-copy p,
+.recovery-state p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.loading-pulse {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgb(39 111 121 / 0.3);
+  animation: loadingPulse 1.6s ease-out infinite;
+}
+
+@keyframes loadingPulse {
+  70% { box-shadow: 0 0 0 13px rgb(39 111 121 / 0); }
+  100% { box-shadow: 0 0 0 0 rgb(39 111 121 / 0); }
+}
+
+.skeleton-grid {
+  width: min(720px, 100%);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.skeleton-grid span {
+  height: 110px;
+  border-radius: 16px;
+  background: linear-gradient(110deg, rgb(220 227 230 / 0.66) 20%, rgb(255 255 255 / 0.84) 40%, rgb(220 227 230 / 0.66) 60%);
+  background-size: 220% 100%;
+  animation: skeletonSweep 1.7s linear infinite;
+}
+
+@keyframes skeletonSweep {
+  to { background-position-x: -220%; }
+}
+
+.confirm-dialog {
+  width: min(430px, calc(100vw - 32px));
+  border: 1px solid rgb(255 255 255 / 0.82);
+  border-radius: 18px;
+  background: var(--workspace);
+  color: var(--ink);
+  box-shadow: var(--shadow-hard);
+  padding: 22px;
+}
+
+.confirm-dialog::backdrop {
+  background: rgb(21 24 28 / 0.48);
+  backdrop-filter: blur(5px);
+}
+
+.dialog-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgb(243 221 217 / 0.9);
+  color: var(--danger);
+}
+
+.confirm-dialog h2 {
+  margin: 16px 0 0;
+  font-size: 24px;
+}
+
+.confirm-dialog p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.dialog-actions {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.danger-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--danger);
+  color: white;
+  padding: 0 17px;
+  font-weight: 800;
+}
+
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .positive {
   color: var(--positive) !important;
 }
@@ -1330,10 +1508,92 @@ textarea {
 
 @media (max-width: 760px) {
   .app-shell {
-    padding: 8px;
+    display: block;
+    padding: 8px 8px 84px;
   }
 
-  .side-rail,
+  .side-rail {
+    display: none;
+  }
+
+  .mobile-header {
+    min-height: 62px;
+    position: sticky;
+    top: 8px;
+    z-index: 20;
+    margin-bottom: 8px;
+    border: 1px solid rgb(255 255 255 / 0.76);
+    border-radius: 18px;
+    background: rgb(239 244 245 / 0.92);
+    box-shadow: 0 8px 18px rgb(31 41 48 / 0.14);
+    backdrop-filter: blur(18px);
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .mobile-header .brand-zone {
+    min-height: 46px;
+    align-items: center;
+  }
+
+  .mobile-header .brand-mark {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+  }
+
+  .mobile-header .icon-button {
+    width: 44px;
+    flex: 0 0 44px;
+  }
+
+  .mobile-nav {
+    position: fixed;
+    left: 8px;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    z-index: 30;
+    min-height: 64px;
+    border: 1px solid rgb(255 255 255 / 0.82);
+    border-radius: 18px;
+    background: rgb(239 244 245 / 0.94);
+    box-shadow: 0 14px 30px rgb(31 41 48 / 0.22);
+    backdrop-filter: blur(20px);
+    padding: 5px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
+  }
+
+  .mobile-nav button {
+    min-width: 0;
+    min-height: 52px;
+    border: 0;
+    border-radius: 13px;
+    background: transparent;
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+    align-content: center;
+    gap: 3px;
+    padding: 4px 2px;
+  }
+
+  .mobile-nav button.active {
+    background: rgb(220 239 240 / 0.9);
+    color: var(--accent-ink);
+  }
+
+  .mobile-nav span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 800;
+  }
+
   .workspace {
     border-radius: 20px;
     padding: 14px;
@@ -1368,6 +1628,11 @@ textarea {
     font-size: 31px;
   }
 
+  .page-title p {
+    margin-top: 7px;
+    line-height: 1.5;
+  }
+
   .top-actions,
   .top-actions input,
   .icon-button,
@@ -1385,6 +1650,32 @@ textarea {
   .provider-test-list,
   .mini-pie-content {
     grid-template-columns: 1fr;
+  }
+
+  .quick-command,
+  .form-panel,
+  .ledger-panel,
+  .settings-panel,
+  .chart-panel {
+    min-height: auto;
+  }
+
+  textarea {
+    min-height: 145px;
+  }
+
+  .loading-state,
+  .recovery-state {
+    min-height: 360px;
+    padding: 24px 16px;
+  }
+
+  .skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .skeleton-grid span:not(:first-child) {
+    display: none;
   }
 
   .board-main {

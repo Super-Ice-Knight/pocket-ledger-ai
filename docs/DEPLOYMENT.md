@@ -1,53 +1,16 @@
 # 部署说明
 
-## 推荐部署形态
+## 当前部署
 
-本项目是前后端分离应用：
+- 前端：https://pocket-ledger-ai.vercel.app/
+- 后端：https://pocket-ledger-ai.onrender.com/
+- GitHub：https://github.com/Super-Ice-Knight/pocket-ledger-ai
 
-- 前端：Vite React 静态站点，推荐部署到 Vercel。
-- 后端：FastAPI Web Service，推荐部署到 Render。
-- 数据库：SQLite。线上演示需要持久磁盘，否则平台重启后数据可能重置。
+前端是 Vite 静态站点，部署到 Vercel；后端是 FastAPI Web Service，部署到 Render；SQLite 位于后端文件系统。
 
-本地版本仍然是最完整、最可信的答辩版本；线上版本定位为演示链接。
+## Render 后端
 
-## GitHub 发布
-
-发布前确认：
-
-```powershell
-git status --short
-git diff --stat
-```
-
-首次发布可以采用：
-
-```powershell
-git branch -M main
-git remote add origin https://github.com/<your-name>/pocket-ledger-ai.git
-git push -u origin main
-```
-
-如果使用 GitHub CLI：
-
-```powershell
-gh auth login
-gh repo create pocket-ledger-ai --private --source=. --remote=origin --push
-```
-
-不要提交：
-
-- `.env`
-- `.venv/`
-- `node_modules/`
-- `frontend/dist/`
-- SQLite `.db` 文件
-- 本机截图输出目录 `output/`
-
-## 后端部署到 Render
-
-可以使用根目录的 `render.yaml` 作为参考，也可以手动创建 Web Service。
-
-手动配置：
+仓库根目录的 `render.yaml` 已包含构建、启动、Python 版本、CORS 和公开只读设置。手动创建服务时使用：
 
 ```text
 Runtime: Python
@@ -56,109 +19,120 @@ Start Command: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check Path: /api/health
 ```
 
-如果使用免费 Web Service 且不添加持久磁盘，数据库路径使用：
+环境变量：
+
+```env
+POCKET_LEDGER_DB_PATH=data/pocket_ledger.db
+PYTHON_VERSION=3.11.9
+OPENAI_COMPATIBLE_BASE_URL=https://apihub.agnes-ai.com/v1
+OPENAI_COMPATIBLE_MODEL=agnes-2.0-flash
+OPENAI_COMPATIBLE_API_KEY=<Render Secret>
+BACKUP_OPENAI_COMPATIBLE_BASE_URL=https://api.siliconflow.cn/v1
+BACKUP_OPENAI_COMPATIBLE_MODEL=deepseek-ai/DeepSeek-V4-Flash
+BACKUP_OPENAI_COMPATIBLE_API_KEY=<Render Secret>
+AI_REQUEST_TIMEOUT_SECONDS=45
+RUNTIME_AI_SETTINGS_WRITABLE=false
+CORS_ALLOWED_ORIGINS=https://pocket-ledger-ai.vercel.app
+```
+
+`render.yaml` 不会替已经手工创建的服务自动补齐 Secret。更新代码后仍需在 Render Dashboard 的 Environment 页面确认两个 Key 和 `RUNTIME_AI_SETTINGS_WRITABLE=false`。
+
+公开部署关闭设置写入，原因是项目没有登录系统。CORS 只能限制浏览器来源，不能代替身份认证。
+
+## SQLite 持久化
+
+免费实例不挂载持久磁盘时：
 
 ```env
 POCKET_LEDGER_DB_PATH=data/pocket_ledger.db
 ```
 
-如果升级到支持持久磁盘的实例，可以添加持久磁盘：
+数据可以跨页面刷新保留，但重新部署或实例重建后可能重置。若升级到支持磁盘的实例：
 
 ```text
 Mount Path: /var/data
 ```
 
-并改用：
-
 ```env
 POCKET_LEDGER_DB_PATH=/var/data/pocket_ledger.db
 ```
 
-后端环境变量：
+README 和演示中必须把免费线上版本描述为“演示级持久化”，不能承诺永久保存。
 
-```env
-POCKET_LEDGER_DB_PATH=data/pocket_ledger.db
-PYTHON_VERSION=3.11.9
-OPENAI_COMPATIBLE_API_KEY=
-OPENAI_COMPATIBLE_BASE_URL=https://api.openai.com/v1
-OPENAI_COMPATIBLE_MODEL=your-model-name
-BACKUP_OPENAI_COMPATIBLE_API_KEY=
-BACKUP_OPENAI_COMPATIBLE_BASE_URL=
-BACKUP_OPENAI_COMPATIBLE_MODEL=
-AI_REQUEST_TIMEOUT_SECONDS=45
-CORS_ALLOWED_ORIGINS=https://your-frontend-domain.vercel.app
-```
-
-`CORS_ALLOWED_ORIGINS` 很重要。前端部署后，需要把 Vercel 域名写进这里，否则浏览器会因为跨域策略拦截请求。
-
-## 前端部署到 Vercel
-
-导入 GitHub 仓库后配置：
+## Vercel 前端
 
 ```text
 Root Directory: frontend
+Framework Preset: Vite
+Install Command: npm install
 Build Command: npm run build
 Output Directory: dist
-Install Command: npm install
 ```
 
-前端环境变量：
+环境变量：
 
 ```env
-VITE_API_BASE_URL=https://your-backend-domain.onrender.com
+VITE_API_BASE_URL=https://pocket-ledger-ai.onrender.com
 ```
 
-部署完成后，回到 Render 后端，把前端域名加入：
+根目录 `frontend/vercel.json` 会把前端路径回退到 `index.html`。
 
-```env
-CORS_ALLOWED_ORIGINS=https://your-frontend-domain.vercel.app
-```
+## 发布顺序
 
-如果同时需要本地和线上前端访问同一个后端，可以逗号分隔：
-
-```env
-CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://your-frontend-domain.vercel.app
-```
+1. 推送 GitHub `main`。
+2. 等待 Render 后端部署完成。
+3. 检查 `/api/health` 和 `/api/settings/public`。
+4. 确认 Render Secret 和只读设置变量。
+5. 等待 Vercel 自动部署。
+6. 从 Vercel 域名完成快记、点评、设置和 CORS 检查。
 
 ## 线上验证
 
-部署后按顺序检查：
+```text
+GET /api/health
+→ {"ok": true}
+```
 
-1. 打开后端 `/api/health`，应返回 `{"ok": true}`。
-2. 打开前端首页，确认没有 `Failed to fetch`。
-3. 进入设置页，保存主接口或备用接口。
-4. 点击“测试主备接口”，确认能返回连接状态。
-5. 输入一句话记账，确认解析、确认入账、流水更新。
-6. 刷新页面，确认 SQLite 持久化是否符合预期。
+```text
+GET /api/settings/public
+→ primary_api_key_configured: true
+→ backup_api_key_configured: true
+→ runtime_settings_writable: false
+```
+
+设置页应显示“线上只读”。AI 快记和财务点评应至少一次显示“主模型”或“备用模型”。
 
 ## 常见故障
 
+### 首次访问等待较久
+
+Render 免费实例闲置后会休眠。前端超过约 1.2 秒显示“后端正在唤醒”，通常等待后可恢复。
+
 ### Failed to fetch
 
-优先检查三件事：
+依次检查：
 
-- 前端 `VITE_API_BASE_URL` 是否指向真实后端域名。
-- 后端是否启动，`/api/health` 是否可访问。
-- 后端 `CORS_ALLOWED_ORIGINS` 是否包含前端域名。
+1. https://pocket-ledger-ai.onrender.com/api/health 是否可访问。
+2. Vercel 的 `VITE_API_BASE_URL` 是否为 Render 域名。
+3. Render 的 `CORS_ALLOWED_ORIGINS` 是否为 Vercel 域名。
+4. 修改 Vercel 环境变量后是否重新部署。
 
-### pydantic-core 构建失败
+### pydantic-core / maturin 构建失败
 
-如果 Render 日志显示默认使用 Python `3.14.x`，并在安装 `pydantic-core` 时出现 `metadata-generation-failed` 或 `maturin` 错误，把后端环境变量加上：
-
-```env
-PYTHON_VERSION=3.11.9
-```
-
-Render 官方说明当前新服务默认 Python 可能是 `3.14.3`，而本项目本地验证版本是 Python `3.11.9`。锁定版本后重新部署即可。
+日志显示 Python 3.14 和 `metadata-generation-failed` 时，确认 `.python-version` 与 Render 环境变量都锁定 `3.11.9`。
 
 ### 设置页显示 Key 未配置
 
-可能原因：
+公开部署不依赖 SQLite 中的网页设置。直接检查 Render Environment 中的 Key、Base URL 和模型名，然后重新部署。
 
-- 后端环境变量为空。
-- 网页设置页保存的配置存在 SQLite，但线上数据库被重置。
-- 前端连接到了另一个后端实例。
+### 保存设置返回 403
+
+这是公开演示的预期安全行为。需要网页保存时，在本地 `.env` 设置：
+
+```env
+RUNTIME_AI_SETTINGS_WRITABLE=true
+```
 
 ### 备用模型没有触发
 
-备用模型只在主模型请求失败、超时或返回不可用时触发。低置信度不会自动切换，因为低置信度可能来自用户输入缺字段，而不是模型服务故障。
+备用模型只在主模型超时、网络错误、响应异常或字段校验失败时触发。用户输入缺字段或置信度较低不等于服务故障。

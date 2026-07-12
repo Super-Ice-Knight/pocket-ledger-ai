@@ -12,18 +12,20 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: OPENAI_COMPATIBLE_BASE_URL
-        value: https://api.openai.com/v1
+        value: https://apihub.agnes-ai.com/v1
       - key: OPENAI_COMPATIBLE_MODEL
-        value: your-model-name
+        value: agnes-2.0-flash
       - key: OPENAI_COMPATIBLE_API_KEY
         sync: false
       - key: BACKUP_OPENAI_COMPATIBLE_BASE_URL
-        sync: false
+        value: https://api.siliconflow.cn/v1
       - key: BACKUP_OPENAI_COMPATIBLE_MODEL
-        sync: false
+        value: deepseek-ai/DeepSeek-V4-Flash
       - key: BACKUP_OPENAI_COMPATIBLE_API_KEY
         sync: false
       - key: AI_REQUEST_TIMEOUT_SECONDS
         value: "45"
+      - key: RUNTIME_AI_SETTINGS_WRITABLE
+        value: "false"
       - key: CORS_ALLOWED_ORIGINS
-        value: https://your-frontend-domain.vercel.app
+        value: https://pocket-ledger-ai.vercel.app

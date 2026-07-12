@@ -20,6 +20,20 @@ def test_local_parser_handles_selection_prompt_sentence():
     assert result.needs_review is True
 
 
+def test_local_parser_prefers_explicit_amount_over_dates_and_counts():
+    result = local_parse("7月11日买了3杯咖啡，微信花了50元")
+
+    assert result.amount_cents == 5000
+    assert "amount_cents" not in result.missing_fields
+
+
+def test_local_parser_marks_ambiguous_number_only_input_for_review():
+    result = local_parse("7月11日买了3杯咖啡，微信")
+
+    assert result.amount_cents == 0
+    assert "amount_cents" in result.missing_fields
+
+
 def test_local_parser_resolves_relative_dates():
     today = datetime.now().date()
     assert local_parse("今天咖啡 24 块微信").occurred_at.date() == today
@@ -62,6 +76,34 @@ def test_public_settings_do_not_expose_api_key():
     body = response.json()
     assert "api_key" not in body
     assert "api_key_configured" in body
+
+
+def test_runtime_ai_settings_can_be_locked_for_public_demo(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "readonly_settings.db"))
+    monkeypatch.setenv("RUNTIME_AI_SETTINGS_WRITABLE", "false")
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+
+    status_response = client.get("/api/settings/public")
+    update_response = client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "must-not-be-saved",
+            "backup_base_url": "",
+            "backup_model": "",
+            "backup_api_key": "",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    assert status_response.status_code == 200
+    assert status_response.json()["runtime_settings_writable"] is False
+    assert update_response.status_code == 403
+    assert update_response.json()["detail"] == "线上演示环境不允许修改 AI 配置"
+    assert "must-not-be-saved" not in update_response.text
 
 
 def test_ai_settings_can_be_saved_without_exposing_keys(tmp_path: Path, monkeypatch):
@@ -162,6 +204,115 @@ def test_ai_parse_tries_backup_provider_after_primary_failure(tmp_path: Path, mo
     assert body["category"] == "学习"
     assert body["account"] == "支付宝"
     assert body["tags"] == ["小额高频"]
+
+
+def test_ai_parse_rejects_unknown_model_category_and_account(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "normalized_model.db"))
+    get_settings.cache_clear()
+    init_db()
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                '{"amount_cents":3600,"type":"expense","category":"mystery",'
+                                '"account":"unknown-pay","occurred_at":"2026-07-07T12:00:00",'
+                                '"note":"买书","tags":[],"confidence":0.91,"missing_fields":[]}'
+                            )
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FakeClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "",
+            "backup_model": "",
+            "backup_api_key": "",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.post("/api/ai/parse-transaction", json={"text": "今天买书36块支付宝"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "model"
+    assert body["category"] == "学习"
+    assert body["account"] == "支付宝"
+
+
+def test_ai_parse_falls_back_locally_when_all_providers_fail(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "all_providers_fail.db"))
+    get_settings.cache_clear()
+    init_db()
+    calls: list[str] = []
+
+    class FailingClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            calls.append(json["model"])
+            raise httpx.TimeoutException("provider timed out")
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FailingClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "https://backup.example/v1",
+            "backup_model": "backup-model",
+            "backup_api_key": "backup-secret",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.post(
+        "/api/ai/parse-transaction",
+        json={"text": "昨天坐地铁花了12.6元，支付宝"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == ["primary-model", "backup-model"]
+    assert body["source"] == "error_fallback"
+    assert body["provider"] == "fallback"
+    assert body["amount_cents"] == 1260
 
 
 def test_ai_provider_test_reports_status_without_exposing_keys(tmp_path: Path, monkeypatch):

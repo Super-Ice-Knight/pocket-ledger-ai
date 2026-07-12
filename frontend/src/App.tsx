@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import {
   ArrowClockwise,
@@ -36,8 +36,10 @@ import { centsToYuan, monthKey, yuanTextToCents } from "./money";
 import type { AdviceResponse, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType } from "./types";
 
 type ViewKey = "overview" | "quick" | "transactions" | "analytics" | "budget" | "settings";
+type DataStatus = "loading" | "waking" | "ready" | "error";
+type TransactionDraft = Omit<Transaction, "id" | "created_at">;
 
-const emptyDraft: Omit<Transaction, "id" | "created_at"> = {
+const emptyDraft: TransactionDraft = {
   amount_cents: 0,
   type: "expense",
   category: "餐饮",
@@ -48,8 +50,8 @@ const emptyDraft: Omit<Transaction, "id" | "created_at"> = {
   tags: [],
 };
 
-const categories = ["餐饮", "交通", "娱乐", "学习", "购物", "住房", "医疗", "其他", "兼职"];
-const accounts = ["微信", "支付宝", "银行卡", "现金"];
+const categories = ["餐饮", "饮品", "交通", "娱乐", "学习", "购物", "住房", "医疗", "兼职", "收入", "其他"];
+const accounts = ["微信", "支付宝", "银行卡", "现金", "未指定"];
 const pieColors = ["#276f79", "#a8844f", "#735a73", "#53697f", "#08776d", "#aa6f58"];
 
 const navItems: Array<{ key: ViewKey; label: string; helper: string; icon: ReactNode }> = [
@@ -90,7 +92,7 @@ const pageCopy: Record<ViewKey, { eyebrow: string; title: string; description: s
   settings: {
     eyebrow: "Settings",
     title: "接口与本地配置",
-    description: "设置主接口、备用接口和超时时间，保存后后端立即按新配置调用模型。",
+    description: "查看主备接口状态；本地可保存配置，线上演示由服务器托管密钥。",
   },
 };
 
@@ -118,7 +120,7 @@ function App() {
   const [advice, setAdvice] = useState<AdviceResponse | null>(null);
   const [tone, setTone] = useState<AdviceTone>("sharp");
   const [quickText, setQuickText] = useState("今天中午和室友吃疯狂星期四花了 50 块，微信付的");
-  const [draft, setDraft] = useState<Omit<Transaction, "id" | "created_at">>(emptyDraft);
+  const [draft, setDraft] = useState<TransactionDraft>(emptyDraft);
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [budgetYuan, setBudgetYuan] = useState("1800");
@@ -130,6 +132,9 @@ function App() {
   const [providerTesting, setProviderTesting] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dataStatus, setDataStatus] = useState<DataStatus>("loading");
+  const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   const displayStats = stats ?? {
@@ -168,8 +173,16 @@ function App() {
     `AI_REQUEST_TIMEOUT_SECONDS=${apiDraft.ai_request_timeout_seconds || "45"}`,
   ].join("\n");
 
-  async function refresh() {
+  async function refresh(resetData = false) {
     setError("");
+    if (resetData) {
+      setStats(null);
+      setTransactions([]);
+    }
+    setDataStatus(resetData || !stats ? "loading" : "ready");
+    const wakeTimer = window.setTimeout(() => {
+      setDataStatus((current) => current === "loading" ? "waking" : current);
+    }, 1200);
     try {
       const [nextStats, nextTransactions] = await Promise.all([
         api.monthlyStats(month),
@@ -180,8 +193,12 @@ function App() {
       if (nextStats.budget_limit_cents) {
         setBudgetYuan(String(nextStats.budget_limit_cents / 100));
       }
+      setDataStatus("ready");
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
+      setDataStatus("error");
+    } finally {
+      window.clearTimeout(wakeTimer);
     }
   }
 
@@ -220,7 +237,7 @@ function App() {
   }
 
   useEffect(() => {
-    refresh();
+    refresh(true);
   }, [month]);
 
   useEffect(() => {
@@ -254,15 +271,15 @@ function App() {
     }
   }
 
-  async function saveDraft() {
+  async function saveDraft(nextDraft: TransactionDraft) {
     setLoading(true);
     setError("");
     const wasEditing = Boolean(editingId);
     try {
       if (editingId) {
-        await api.updateTransaction(editingId, draft);
+        await api.updateTransaction(editingId, nextDraft);
       } else {
-        await api.createTransaction(draft);
+        await api.createTransaction(nextDraft);
       }
       setEditingId(null);
       setParsed(null);
@@ -287,8 +304,18 @@ function App() {
   }
 
   async function removeTransaction(id: number) {
-    await api.deleteTransaction(id);
-    await refresh();
+    setDeleting(true);
+    setError("");
+    try {
+      await api.deleteTransaction(id);
+      setPendingDelete(null);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "删除失败，请稍后重试");
+      setPendingDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function editTransaction(item: Transaction) {
@@ -352,10 +379,31 @@ function App() {
   }
 
   const page = pageCopy[activeView];
+  const requiresStats = activeView !== "quick" && activeView !== "settings";
 
   return (
     <main className="app-root">
       <div className="app-shell">
+        <header className="mobile-header">
+          <div className="brand-zone">
+            <div className="brand-mark">
+              <Wallet size={22} weight="duotone" />
+            </div>
+            <div>
+              <strong>口袋记账</strong>
+              <span>AI Ledger</span>
+            </div>
+          </div>
+          <button
+            className="icon-button"
+            onClick={() => setActiveView("settings")}
+            aria-label="打开设置"
+            aria-current={activeView === "settings" ? "page" : undefined}
+          >
+            <GearSix size={20} />
+          </button>
+        </header>
+
         <aside className="side-rail">
           <div className="brand-zone">
             <div className="brand-mark">
@@ -372,6 +420,7 @@ function App() {
                 key={item.key}
                 className={`rail-item ${activeView === item.key ? "active" : ""}`}
                 onClick={() => setActiveView(item.key)}
+                aria-current={activeView === item.key ? "page" : undefined}
               >
                 {item.icon}
                 <span>
@@ -396,17 +445,20 @@ function App() {
               <p>{page.description}</p>
             </div>
             <div className="top-actions">
-              <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
-              <button className="icon-button" onClick={refresh} aria-label="刷新">
+              <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+              <button className="icon-button" onClick={() => refresh()} aria-label="刷新">
                 <ArrowClockwise size={18} />
               </button>
             </div>
           </header>
 
-          {error && <div className="error-strip">{error}</div>}
+          {error && <div className="error-strip" role="alert">{error}</div>}
 
-          <section className="page-frame" aria-live="polite">
-            {activeView === "overview" && (
+          <section className="page-frame" aria-live="polite" aria-busy={requiresStats && (dataStatus === "loading" || dataStatus === "waking")}>
+            {requiresStats && !stats ? (
+              <DataLoadState status={dataStatus} onRetry={() => refresh(true)} />
+            ) : <>
+              {activeView === "overview" && (
               <OverviewPage
                 displayStats={displayStats}
                 budgetStatus={budgetStatus}
@@ -422,9 +474,9 @@ function App() {
                 onOpenQuick={() => setActiveView("quick")}
                 onOpenAnalytics={() => setActiveView("analytics")}
               />
-            )}
+              )}
 
-            {activeView === "quick" && (
+              {activeView === "quick" && (
               <QuickEntryPage
                 quickText={quickText}
                 setQuickText={setQuickText}
@@ -436,18 +488,18 @@ function App() {
                 parseQuickEntry={parseQuickEntry}
                 saveDraft={saveDraft}
               />
-            )}
+              )}
 
-            {activeView === "transactions" && (
+              {activeView === "transactions" && (
               <TransactionsPage
                 transactions={transactions}
                 groupedTransactions={groupedTransactions}
                 editTransaction={editTransaction}
-                removeTransaction={removeTransaction}
+                requestDelete={setPendingDelete}
               />
-            )}
+              )}
 
-            {activeView === "analytics" && (
+              {activeView === "analytics" && (
               <AnalyticsPage
                 displayStats={displayStats}
                 topCategory={topCategory}
@@ -455,9 +507,9 @@ function App() {
                 averageDailyExpense={averageDailyExpense}
                 activeDays={activeDays}
               />
-            )}
+              )}
 
-            {activeView === "budget" && (
+              {activeView === "budget" && (
               <BudgetPage
                 displayStats={displayStats}
                 budgetStatus={budgetStatus}
@@ -468,9 +520,9 @@ function App() {
                 tone={tone}
                 setTone={setTone}
               />
-            )}
+              )}
 
-            {activeView === "settings" && (
+              {activeView === "settings" && (
               <SettingsPage
                 settingsStatus={settingsStatus}
                 apiDraft={apiDraft}
@@ -486,11 +538,108 @@ function App() {
                 testAiProviders={testAiProviders}
                 envPreview={envPreview}
               />
-            )}
+              )}
+            </>}
           </section>
         </section>
+
+        <nav className="mobile-nav" aria-label="手机主导航">
+          {navItems.filter((item) => item.key !== "settings").map((item) => (
+            <button
+              key={item.key}
+              className={activeView === item.key ? "active" : ""}
+              onClick={() => setActiveView(item.key)}
+              aria-current={activeView === item.key ? "page" : undefined}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
       </div>
+      <DeleteTransactionDialog
+        transaction={pendingDelete}
+        deleting={deleting}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={(id) => removeTransaction(id)}
+      />
     </main>
+  );
+}
+
+function DataLoadState({ status, onRetry }: { status: DataStatus; onRetry: () => void }) {
+  if (status === "error") {
+    return (
+      <section className="panel recovery-state">
+        <Database size={28} />
+        <div>
+          <h2>暂时没有连接到后端</h2>
+          <p>免费实例可能仍在唤醒，也可以先进入 AI 快记填写草稿，稍后再保存。</p>
+        </div>
+        <button className="primary-button" onClick={onRetry}>重新连接</button>
+      </section>
+    );
+  }
+  return (
+    <section className="panel loading-state">
+      <div className="loading-copy">
+        <span className="loading-pulse" />
+        <div>
+          <h2>{status === "waking" ? "后端正在唤醒" : "正在读取本月账本"}</h2>
+          <p>{status === "waking" ? "Render 免费实例首次访问可能需要约一分钟。" : "正在加载流水、预算和统计。"}</p>
+        </div>
+      </div>
+      <div className="skeleton-grid" aria-hidden="true">
+        <span /><span /><span />
+      </div>
+    </section>
+  );
+}
+
+function DeleteTransactionDialog({
+  transaction,
+  deleting,
+  onCancel,
+  onConfirm,
+}: {
+  transaction: Transaction | null;
+  deleting: boolean;
+  onCancel: () => void;
+  onConfirm: (id: number) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (transaction && !dialog.open) dialog.showModal();
+    if (!transaction && dialog.open) dialog.close();
+  }, [transaction]);
+
+  return (
+    <dialog
+      className="confirm-dialog"
+      ref={dialogRef}
+      aria-labelledby="delete-dialog-title"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!deleting) onCancel();
+      }}
+    >
+      {transaction && <>
+        <div className="dialog-icon"><Trash size={22} /></div>
+        <div>
+          <h2 id="delete-dialog-title">删除这笔流水？</h2>
+          <p>{transaction.note || transaction.category}，{transaction.type === "income" ? "+" : "-"}¥{centsToYuan(transaction.amount_cents)}</p>
+        </div>
+        <div className="dialog-actions">
+          <button className="ghost-button" onClick={onCancel} disabled={deleting}>取消</button>
+          <button className="danger-button" onClick={() => onConfirm(transaction.id)} disabled={deleting}>
+            {deleting ? "删除中" : "确认删除"}
+          </button>
+        </div>
+      </>}
+    </dialog>
   );
 }
 
@@ -524,6 +673,7 @@ function OverviewPage({
   onOpenAnalytics: () => void;
 }) {
   const budgetPercent = Math.round(displayStats.budget_usage_ratio * 100);
+  const aiRuntimeLabel = advice ? providerLabel(advice.provider) : settingsStatus?.api_key_configured ? "模型连接中" : "本地规则";
   return (
     <div className="overview-page page-stack">
       <section className="command-board">
@@ -531,7 +681,7 @@ function OverviewPage({
           <div className="board-toolbar" aria-label="本月总览控制条">
             <span>预算 {budgetPercent}%</span>
             <span>{transactionCount} 笔流水</span>
-            <span>{settingsStatus?.api_key_configured ? "模型接入" : "本地兜底"}</span>
+            <span>{aiRuntimeLabel}</span>
           </div>
           <div className="board-copy">
             <span className="kicker">月度净现金流</span>
@@ -553,7 +703,7 @@ function OverviewPage({
         </div>
         <div className="board-side">
           <StatusLine label="预算线" value={budgetStatus} />
-          <StatusLine label="AI 接口" value={settingsStatus?.api_key_configured ? "模型已接入" : "本地规则兜底"} />
+          <StatusLine label="AI 接口" value={aiRuntimeLabel} />
           <StatusLine label="活跃记账日" value={`${activeDays} 天`} />
         </div>
       </section>
@@ -569,14 +719,15 @@ function OverviewPage({
           <div className="panel-title">
             <Brain size={20} />
             <span>AI 财务点评</span>
+            <small className="provider-badge">{advice ? providerLabel(advice.provider) : "生成中"}</small>
           </div>
           <div className="advice-copy">
             <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
             <p>{advice?.detail || "AI 正在根据本月收入、支出、预算、分类和账户分布生成详细分析。"}</p>
           </div>
           <div className="segmented">
-            <button className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
-            <button className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
+            <button aria-pressed={tone === "sharp"} className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
+            <button aria-pressed={tone === "warm"} className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
           </div>
         </div>
         <div className="panel insight-panel">
@@ -606,12 +757,12 @@ function QuickEntryPage({
   quickText: string;
   setQuickText: (value: string) => void;
   parsed: ParseResult | null;
-  draft: Omit<Transaction, "id" | "created_at">;
-  setDraft: (draft: Omit<Transaction, "id" | "created_at">) => void;
+  draft: TransactionDraft;
+  setDraft: (draft: TransactionDraft) => void;
   loading: boolean;
   editingId: number | null;
   parseQuickEntry: () => void;
-  saveDraft: () => void;
+  saveDraft: (draft: TransactionDraft) => void;
 }) {
   return (
     <div className="quick-layout">
@@ -664,12 +815,12 @@ function TransactionsPage({
   transactions,
   groupedTransactions,
   editTransaction,
-  removeTransaction,
+  requestDelete,
 }: {
   transactions: Transaction[];
   groupedTransactions: TransactionDateGroup[];
   editTransaction: (item: Transaction) => void;
-  removeTransaction: (id: number) => void;
+  requestDelete: (item: Transaction) => void;
 }) {
   return (
     <section className="panel ledger-panel">
@@ -708,8 +859,8 @@ function TransactionsPage({
                   </div>
                   <div className="row-actions">
                     <b className={item.type === "income" ? "positive" : ""}>{item.type === "income" ? "+" : "-"}¥{centsToYuan(item.amount_cents)}</b>
-                    <button onClick={() => editTransaction(item)} aria-label="编辑"><PencilSimple size={17} /></button>
-                    <button onClick={() => removeTransaction(item.id)} aria-label="删除"><Trash size={17} /></button>
+                    <button onClick={() => editTransaction(item)} aria-label={`编辑${item.note || item.category}`}><PencilSimple size={17} /></button>
+                    <button onClick={() => requestDelete(item)} aria-label={`删除${item.note || item.category}`}><Trash size={17} /></button>
                   </div>
                 </div>
               ))}
@@ -820,6 +971,7 @@ function BudgetPage({
         <div className="panel-title">
           <Brain size={20} />
           <span>预算建议</span>
+          <small className="provider-badge">{advice ? providerLabel(advice.provider) : "生成中"}</small>
         </div>
         <div className="advice-copy">
           <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
@@ -831,8 +983,8 @@ function BudgetPage({
           ))}
         </div>
         <div className="segmented">
-          <button className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
-          <button className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
+          <button aria-pressed={tone === "sharp"} className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
+          <button aria-pressed={tone === "warm"} className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
         </div>
       </section>
     </div>
@@ -869,14 +1021,17 @@ function SettingsPage({
   envPreview: string;
 }) {
   const backupState = settingsStatus?.backup_enabled ? "备用已启用" : "备用未启用";
+  const writable = settingsStatus?.runtime_settings_writable;
   return (
     <section className="panel settings-panel">
       <div className="section-heading">
         <div>
           <span className="kicker">Runtime</span>
-          <h2>真实 API 配置</h2>
+          <h2>API 运行配置</h2>
         </div>
-        <span className="status-pill">{settingsStatus?.primary_api_key_configured ? "主 Key 已配置" : "主 Key 未配置"}</span>
+        <span className="status-pill">
+          {!settingsStatus ? "状态未连接" : writable ? settingsStatus.primary_api_key_configured ? "主 Key 已配置" : "主 Key 未配置" : "线上只读"}
+        </span>
       </div>
       <div className="settings-layout">
         <div className="settings-status">
@@ -897,6 +1052,15 @@ function SettingsPage({
           </div>
         </div>
         <div className="settings-form">
+          {writable === false && (
+            <div className="readonly-notice">
+              <ShieldCheck size={20} />
+              <div>
+                <strong>公开演示已锁定配置写入</strong>
+                <span>模型和 Key 由 Render 环境变量管理，浏览器只显示非敏感状态。</span>
+              </div>
+            </div>
+          )}
           <div className="settings-group">
             <span className="form-caption">Primary</span>
             <label className="field-block">
@@ -905,6 +1069,7 @@ function SettingsPage({
                 value={apiDraft.primary_base_url}
                 onChange={(event) => setApiDraft({ ...apiDraft, primary_base_url: event.target.value })}
                 placeholder="https://api.openai.com/v1"
+                disabled={writable !== true}
               />
             </label>
             <label className="field-block">
@@ -913,9 +1078,10 @@ function SettingsPage({
                 value={apiDraft.primary_model}
                 onChange={(event) => setApiDraft({ ...apiDraft, primary_model: event.target.value })}
                 placeholder="gpt-4.1-mini"
+                disabled={writable !== true}
               />
             </label>
-            <label className="field-block">
+            {writable === true && <label className="field-block">
               <span>主 API Key</span>
               <input
                 type="password"
@@ -923,7 +1089,7 @@ function SettingsPage({
                 onChange={(event) => setApiSecretDraft(event.target.value)}
                 placeholder={settingsStatus?.primary_api_key_configured ? "已配置，留空则保留" : "输入主 Key"}
               />
-            </label>
+            </label>}
           </div>
           <div className="settings-group">
             <span className="form-caption">Backup</span>
@@ -933,6 +1099,7 @@ function SettingsPage({
                 value={apiDraft.backup_base_url}
                 onChange={(event) => setApiDraft({ ...apiDraft, backup_base_url: event.target.value })}
                 placeholder="https://api.siliconflow.cn/v1"
+                disabled={writable !== true}
               />
             </label>
             <label className="field-block">
@@ -941,9 +1108,10 @@ function SettingsPage({
                 value={apiDraft.backup_model}
                 onChange={(event) => setApiDraft({ ...apiDraft, backup_model: event.target.value })}
                 placeholder="deepseek-ai/DeepSeek-V4-Pro"
+                disabled={writable !== true}
               />
             </label>
-            <label className="field-block">
+            {writable === true && <label className="field-block">
               <span>备用 API Key</span>
               <input
                 type="password"
@@ -951,7 +1119,7 @@ function SettingsPage({
                 onChange={(event) => setBackupSecretDraft(event.target.value)}
                 placeholder={settingsStatus?.backup_api_key_configured ? "已配置，留空则保留" : "输入备用 Key"}
               />
-            </label>
+            </label>}
           </div>
           <label className="field-block">
             <span>超时秒数</span>
@@ -962,10 +1130,11 @@ function SettingsPage({
               value={apiDraft.ai_request_timeout_seconds}
               onChange={(event) => setApiDraft({ ...apiDraft, ai_request_timeout_seconds: event.target.value })}
               placeholder="45"
+              disabled={writable !== true}
             />
           </label>
           <div className="settings-actions">
-            <button className="primary-button" onClick={saveApiSettings}>{settingsSaved ? "已保存到后端" : "保存真实配置"}</button>
+            {writable === true && <button className="primary-button" onClick={saveApiSettings}>{settingsSaved ? "已保存到后端" : "保存真实配置"}</button>}
             <button className="ghost-button" onClick={testAiProviders} disabled={providerTesting}>
               <ArrowClockwise size={18} />
               {providerTesting ? "测试中" : "测试主备接口"}
@@ -1003,7 +1172,13 @@ function SettingsPage({
             ))}
           </div>
         </div>
-        <pre className="env-preview">{envPreview}</pre>
+        <pre className="env-preview">{
+          writable === true
+            ? envPreview
+            : writable === false
+              ? "线上演示模式\nAI 配置来源: Render Environment Variables\n浏览器写入: disabled\n真实 Key: never exposed"
+              : "正在读取后端设置状态..."
+        }</pre>
       </div>
     </section>
   );
@@ -1053,15 +1228,55 @@ function TransactionForm({
   onSave,
   editingId,
 }: {
-  draft: Omit<Transaction, "id" | "created_at">;
-  setDraft: (draft: Omit<Transaction, "id" | "created_at">) => void;
-  onSave: () => void;
+  draft: TransactionDraft;
+  setDraft: (draft: TransactionDraft) => void;
+  onSave: (draft: TransactionDraft) => void;
   editingId: number | null;
 }) {
   const [tagText, setTagText] = useState("");
-  const amountYuan = draft.amount_cents ? String(draft.amount_cents / 100) : "";
-  const update = <K extends keyof Omit<Transaction, "id" | "created_at">>(key: K, value: Omit<Transaction, "id" | "created_at">[K]) => {
+  const [amountText, setAmountText] = useState(draft.amount_cents ? String(draft.amount_cents / 100) : "");
+  const [amountError, setAmountError] = useState("");
+  const amountChangedLocally = useRef(false);
+  const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => {
     setDraft({ ...draft, [key]: value });
+  };
+
+  useEffect(() => {
+    if (amountChangedLocally.current) {
+      amountChangedLocally.current = false;
+      return;
+    }
+    setAmountText(draft.amount_cents ? String(draft.amount_cents / 100) : "");
+    setAmountError("");
+  }, [draft.amount_cents, draft.raw_text, editingId]);
+
+  const updateAmount = (value: string) => {
+    setAmountText(value);
+    if (!value) {
+      setAmountError("请输入金额");
+      return;
+    }
+    if (!/^\d+(?:\.\d{0,2})?$/.test(value)) {
+      setAmountError("金额只能填写数字，最多保留两位小数");
+      return;
+    }
+    if (value.endsWith(".")) {
+      setAmountError("请补全小数位");
+      return;
+    }
+    setAmountError("");
+    amountChangedLocally.current = true;
+    update("amount_cents", yuanTextToCents(value));
+  };
+
+  const submit = () => {
+    try {
+      const amountCents = yuanTextToCents(amountText);
+      setAmountError("");
+      onSave({ ...draft, amount_cents: amountCents });
+    } catch (error) {
+      setAmountError(error instanceof Error ? error.message : "请输入正确金额");
+    }
   };
   const addTag = () => {
     const tag = tagText.trim().replace(/^#/, "");
@@ -1078,16 +1293,14 @@ function TransactionForm({
       <label className="field-block">
         <span>金额</span>
         <input
-          value={amountYuan}
-          onChange={(event) => {
-            try {
-              update("amount_cents", yuanTextToCents(event.target.value));
-            } catch {
-              update("amount_cents", 0);
-            }
-          }}
+          inputMode="decimal"
+          value={amountText}
+          onChange={(event) => updateAmount(event.target.value)}
           placeholder="50.00"
+          aria-invalid={Boolean(amountError)}
+          aria-describedby={amountError ? "amount-error" : undefined}
         />
+        {amountError && <small className="field-error" id="amount-error">{amountError}</small>}
       </label>
       <label className="field-block">
         <span>类型</span>
@@ -1105,7 +1318,7 @@ function TransactionForm({
       <label className="field-block">
         <span>账户</span>
         <select value={draft.account} onChange={(event) => update("account", event.target.value)}>
-          {accounts.map((account) => <option key={account}>{account}</option>)}
+          {accounts.map((account) => <option key={account} disabled={account === "未指定"}>{account}</option>)}
         </select>
       </label>
       <label className="field-block wide">
@@ -1137,7 +1350,11 @@ function TransactionForm({
           </div>
         )}
       </label>
-      <button className="primary-button save-button" onClick={onSave} disabled={!draft.amount_cents || !draft.category || !draft.account}>
+      <button
+        className="primary-button save-button"
+        onClick={submit}
+        disabled={Boolean(amountError) || !amountText || !draft.category || !draft.account || draft.account === "未指定"}
+      >
         {editingId ? "保存修改" : "确认入账"}
       </button>
     </div>

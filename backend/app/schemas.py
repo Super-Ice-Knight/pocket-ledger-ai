@@ -118,6 +118,7 @@ class SettingsStatus(BaseModel):
     backup_enabled: bool
     ai_request_timeout_seconds: int
     database_file: str
+    runtime_settings_writable: bool
 
 
 class AiSettingsUpdate(BaseModel):

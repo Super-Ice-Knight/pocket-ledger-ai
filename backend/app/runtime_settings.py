@@ -115,6 +115,7 @@ def to_settings_status(runtime: RuntimeAiSettings) -> SettingsStatus:
         backup_enabled=backup_configured,
         ai_request_timeout_seconds=runtime.ai_request_timeout_seconds,
         database_file=get_settings().resolved_database_path.name,
+        runtime_settings_writable=get_settings().runtime_ai_settings_writable,
     )
 
 

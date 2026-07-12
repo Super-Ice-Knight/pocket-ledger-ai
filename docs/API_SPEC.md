@@ -24,7 +24,7 @@
   "type": "expense",
   "category": "餐饮",
   "account": "微信",
-  "occurred_at": "2026-06-30T12:00:00",
+  "occurred_at": "2026-07-12T12:00:00",
   "note": "疯狂星期四",
   "raw_text": "今天中午和室友吃疯狂星期四花了 50 块，微信付的",
   "tags": [],
@@ -36,6 +36,10 @@
 }
 ```
 
+本地兜底优先识别带“元、块、¥”的金额，再识别“花了、收入、报销、共、合计”等语境。日期、时间和“3杯、2件”等数量不会作为金额；仍有歧义时返回 `amount_cents=0` 并把 `amount_cents` 加入 `missing_fields`。
+
+分类会归一化到餐饮、饮品、交通、娱乐、学习、购物、住房、医疗、兼职、收入或其他；账户会归一化到微信、支付宝、银行卡、现金或未指定。
+
 ## POST /api/transactions
 
 创建账单。请求体字段：
@@ -46,7 +50,7 @@
   "type": "expense",
   "category": "餐饮",
   "account": "微信",
-  "occurred_at": "2026-06-30T12:00:00",
+  "occurred_at": "2026-07-12T12:00:00",
   "note": "疯狂星期四",
   "raw_text": "今天中午和室友吃疯狂星期四花了 50 块，微信付的",
   "tags": ["社交", "高频"]
@@ -102,24 +106,25 @@
 
 ```json
 {
-  "openai_base_url": "https://api.openai.com/v1",
-  "openai_model": "your-model-name",
-  "api_key_configured": false,
-  "primary_base_url": "https://api.openai.com/v1",
-  "primary_model": "your-model-name",
-  "primary_api_key_configured": false,
+  "openai_base_url": "https://apihub.agnes-ai.com/v1",
+  "openai_model": "agnes-2.0-flash",
+  "api_key_configured": true,
+  "primary_base_url": "https://apihub.agnes-ai.com/v1",
+  "primary_model": "agnes-2.0-flash",
+  "primary_api_key_configured": true,
   "backup_base_url": "https://api.siliconflow.cn/v1",
   "backup_model": "deepseek-ai/DeepSeek-V4-Flash",
-  "backup_api_key_configured": false,
-  "backup_enabled": false,
+  "backup_api_key_configured": true,
+  "backup_enabled": true,
   "ai_request_timeout_seconds": 45,
-  "database_file": "pocket_ledger.db"
+  "database_file": "pocket_ledger.db",
+  "runtime_settings_writable": false
 }
 ```
 
 ## PUT /api/settings/ai
 
-保存真实 AI 运行配置。第一版是本地单用户演示，密钥会保存在本地 SQLite 的 `app_settings` 表中；响应仍然只返回是否已配置，不回显真实 Key。
+保存真实 AI 运行配置。本地默认 `RUNTIME_AI_SETTINGS_WRITABLE=true`，密钥保存在 SQLite 的 `app_settings` 表中；响应只返回是否已配置，不回显真实 Key。
 
 请求：
 
@@ -136,6 +141,18 @@
 ```
 
 如果 `primary_api_key` 或 `backup_api_key` 为空，后端会保留已有 Key。调用模型时先尝试主接口，主接口异常后再尝试备用接口；全部失败才进入 `error_fallback`。
+
+公开 Render 演示应设置 `RUNTIME_AI_SETTINGS_WRITABLE=false`。此时接口返回：
+
+```http
+HTTP/1.1 403 Forbidden
+```
+
+```json
+{
+  "detail": "线上演示环境不允许修改 AI 配置"
+}
+```
 
 ## POST /api/settings/ai/test
 

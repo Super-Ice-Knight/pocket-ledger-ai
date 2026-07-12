@@ -75,6 +75,8 @@ def settings_public() -> SettingsStatus:
 
 @app.put("/api/settings/ai", response_model=SettingsStatus)
 def update_ai_settings(payload: AiSettingsUpdate) -> SettingsStatus:
+    if not get_settings().runtime_ai_settings_writable:
+        raise HTTPException(status_code=403, detail="线上演示环境不允许修改 AI 配置")
     return save_runtime_ai_settings(payload)
 
 
