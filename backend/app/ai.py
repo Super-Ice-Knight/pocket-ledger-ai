@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import json
 import re
 from time import perf_counter
+from urllib.parse import urlparse
 import httpx
 from .runtime_settings import AiProvider, get_runtime_ai_settings
 from .money import extract_transaction_amount_cents, MoneyParseError
@@ -177,7 +178,7 @@ async def parse_with_model(text: str) -> ParseResult:
                 response_format={"type": "json_object"},
                 temperature=0.1,
             )
-            parsed = json.loads(content)
+            parsed = decode_json_object(content)
             local = local_parse(text)
             occurred_at = local.occurred_at if has_relative_date(text) else parsed.get("occurred_at") or local.occurred_at
             return ParseResult(
@@ -210,13 +211,12 @@ async def request_chat_completion(
     temperature: float,
     response_format: dict | None = None,
 ) -> str:
-    payload = {
-        "model": provider.model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-    if response_format:
-        payload["response_format"] = response_format
+    payload = build_chat_completion_payload(
+        provider=provider,
+        messages=messages,
+        temperature=temperature,
+        response_format=response_format,
+    )
     async with httpx.AsyncClient(timeout=timeout) as client:
         response = await client.post(
             f"{provider.base_url.rstrip('/')}/chat/completions",
@@ -225,6 +225,45 @@ async def request_chat_completion(
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
+
+
+def build_chat_completion_payload(
+    provider: AiProvider,
+    messages: list[dict[str, str]],
+    temperature: float,
+    response_format: dict | None = None,
+) -> dict:
+    payload: dict = {
+        "model": provider.model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    if response_format:
+        payload["response_format"] = response_format
+    if urlparse(provider.base_url).hostname == "api.groq.com" and provider.model.lower().startswith("qwen/"):
+        payload["reasoning_effort"] = "none"
+    return payload
+
+
+def decode_json_object(content: str) -> dict:
+    text = str(content).strip()
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as first_error:
+        decoder = json.JSONDecoder()
+        for index, character in enumerate(text):
+            if character != "{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                return candidate
+        raise ValueError("模型未返回有效 JSON 对象") from first_error
+    if not isinstance(parsed, dict):
+        raise ValueError("模型返回的 JSON 不是对象")
+    return parsed
 
 
 async def test_ai_providers(slot: AiProviderTestSlot = "all") -> list[AiProviderTestResult]:
@@ -326,7 +365,7 @@ async def monthly_advice(stats: dict, tone: AdviceTone) -> dict:
                 temperature=0.45,
             )
             return {
-                **normalize_advice_payload(json.loads(content), fallback),
+                **normalize_advice_payload(decode_json_object(content), fallback),
                 "tone": tone,
                 "source": "model",
                 "provider": provider.slot,

@@ -9,7 +9,8 @@ from app.main import app
 from app.money import parse_yuan_to_cents
 from app.repository import create_transaction
 from app.schemas import TransactionCreate
-from app.ai import local_parse
+from app.ai import build_chat_completion_payload, decode_json_object, local_parse
+from app.runtime_settings import AiProvider
 
 
 def test_local_parser_handles_selection_prompt_sentence():
@@ -18,6 +19,31 @@ def test_local_parser_handles_selection_prompt_sentence():
     assert result.category == "餐饮"
     assert result.account == "微信"
     assert result.needs_review is True
+
+
+def test_groq_qwen_request_disables_reasoning_for_low_latency():
+    provider = AiProvider(
+        slot="primary",
+        base_url="https://api.groq.com/openai/v1",
+        model="qwen/qwen3.6-27b",
+        api_key="test-secret",
+    )
+
+    payload = build_chat_completion_payload(
+        provider=provider,
+        messages=[{"role": "user", "content": "返回 JSON"}],
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+
+    assert payload["reasoning_effort"] == "none"
+    assert payload["response_format"] == {"type": "json_object"}
+
+
+def test_json_decoder_accepts_reasoning_and_code_fence_wrapper():
+    content = '<think>先分析预算。</think>\n```json\n{"headline":"预算稳定"}\n```'
+
+    assert decode_json_object(content) == {"headline": "预算稳定"}
 
 
 def test_local_parser_prefers_explicit_amount_over_dates_and_counts():
@@ -409,9 +435,10 @@ def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
                     {
                         "message": {
                             "content": (
+                                '<think>先比较预算、分类和日均支出。</think>\n```json\n'
                                 '{"headline":"咖啡预算正在偷跑",'
                                 '"detail":"本月餐饮和饮品支出偏高，预算还没有爆掉，但小额高频已经开始侵蚀剩余额度。接下来需要盯住每天的随手消费。",'
-                                '"action_items":["减少饮品频率","复盘餐饮明细"]}'
+                                '"action_items":["减少饮品频率","复盘餐饮明细"]}\n```'
                             )
                         }
                     }
