@@ -153,6 +153,7 @@ function App() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const adviceRequestId = useRef(0);
+  const weeklyRequestId = useRef(0);
   const adviceScope = useRef("");
 
   const displayStats = stats ?? {
@@ -233,6 +234,7 @@ function App() {
   }
 
   async function refreshWeekly(resetData = false) {
+    const requestId = ++weeklyRequestId.current;
     setError("");
     if (resetData) {
       setWeeklyStats(null);
@@ -245,12 +247,15 @@ function App() {
         api.weeklyStats(range.start),
         api.listTransactionsByDateRange(range.start, range.end),
       ]);
+      if (requestId !== weeklyRequestId.current) return;
       setWeeklyStats(nextStats);
       setWeeklyTransactions(nextTransactions);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "本周流水加载失败");
+      if (requestId === weeklyRequestId.current) {
+        setError(err instanceof Error ? err.message : "本周流水加载失败");
+      }
     } finally {
-      setWeeklyLoading(false);
+      if (requestId === weeklyRequestId.current) setWeeklyLoading(false);
     }
   }
 
