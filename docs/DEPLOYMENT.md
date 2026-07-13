@@ -58,6 +58,8 @@ POCKET_LEDGER_DB_PATH=/var/data/pocket_ledger.db
 
 README 和演示中必须把免费线上版本描述为“演示级持久化”，不能承诺永久保存。
 
+`ai_advice_cache` 与账单、预算使用同一个 SQLite 文件，后端启动时通过 `init_db()` 自动创建，不需要在 Render 手动执行迁移。免费实例重建时，账单和已生成点评都可能一起重置。
+
 ## Vercel 前端
 
 ```text
@@ -85,6 +87,8 @@ VITE_API_BASE_URL=https://pocket-ledger-ai.onrender.com
 5. 等待 Vercel 自动部署。
 6. 从 Vercel 域名完成快记、点评、设置和 CORS 检查。
 
+若某次提交只修改 `frontend/` 和文档，Vercel 部署该提交即可，Render 无需手动重新部署。只有后端接口、数据库结构或服务器配置变化时，才要确认 Render 也上线同一或兼容提交。
+
 ## 线上验证
 
 ```text
@@ -100,7 +104,7 @@ GET /api/settings/public
 → runtime_settings_writable: false
 ```
 
-设置页应显示“线上只读”。AI 快记和财务点评应至少一次显示“主模型”。2026-07-13 最终验收基线为：健康接口 170 ms、Groq 服务端测试 917 ms、普通快记 3.64 秒、汉字金额快记 4.87 秒、结构化月度点评 5.25 秒。
+设置页应显示“线上只读”。AI 快记和财务点评应至少一次显示“主模型”；点评生成后重新打开页面应命中 SQLite 缓存，新增流水后应显示“待更新”。2026-07-13 最终验收基线为：健康接口 170 ms、Groq 服务端测试 917 ms、普通快记 3.64 秒、汉字金额快记 4.87 秒、结构化月度点评 5.25 秒。
 
 ## 常见故障
 
