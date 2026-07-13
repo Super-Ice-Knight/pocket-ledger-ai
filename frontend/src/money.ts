@@ -19,3 +19,31 @@ export function monthKey(date = new Date()): string {
   return `${date.getFullYear()}-${month}`;
 }
 
+export function isoWeekKey(date = new Date()): string {
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const weekday = target.getUTCDay() || 7;
+  target.setUTCDate(target.getUTCDate() + 4 - weekday);
+  const isoYear = target.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const weekNumber = Math.ceil(((target.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${isoYear}-W${String(weekNumber).padStart(2, "0")}`;
+}
+
+export function isoWeekRange(weekKey: string): { start: string; end: string } {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekKey);
+  if (!match) return isoWeekRange(isoWeekKey());
+
+  const year = Number(match[1]);
+  const week = Number(match[2]);
+  const januaryFourth = new Date(Date.UTC(year, 0, 4));
+  const januaryFourthWeekday = januaryFourth.getUTCDay() || 7;
+  const monday = new Date(januaryFourth);
+  monday.setUTCDate(januaryFourth.getUTCDate() - januaryFourthWeekday + 1 + (week - 1) * 7);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+
+  return {
+    start: monday.toISOString().slice(0, 10),
+    end: sunday.toISOString().slice(0, 10),
+  };
+}

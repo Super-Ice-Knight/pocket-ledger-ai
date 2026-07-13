@@ -20,4 +20,5 @@ output/
 tmp/
 选拔指南.pdf
 .impeccable/
+.playwright-cli/
 backend/package-lock.json

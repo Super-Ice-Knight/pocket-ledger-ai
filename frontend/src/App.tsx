@@ -32,13 +32,15 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "./api";
-import { centsToYuan, monthKey, yuanTextToCents } from "./money";
-import type { AdviceResponse, AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType } from "./types";
+import { centsToYuan, isoWeekKey, isoWeekRange, monthKey, yuanTextToCents } from "./money";
+import type { AdviceResponse, AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType, WeeklyStats } from "./types";
 
 type ViewKey = "overview" | "quick" | "transactions" | "analytics" | "budget" | "settings";
 type DataStatus = "loading" | "waking" | "ready" | "error";
 type AdviceBusyState = "idle" | "cache" | "generate";
+type LedgerPeriod = "month" | "week";
 type TransactionDraft = Omit<Transaction, "id" | "created_at">;
+type LedgerSummary = Pick<WeeklyStats, "income_cents" | "expense_cents" | "balance_cents" | "transaction_count">;
 
 const emptyAdviceSnapshot: AdviceSnapshot = {
   status: "missing",
@@ -62,44 +64,44 @@ const accounts = ["微信", "支付宝", "银行卡", "现金", "未指定"];
 const pieColors = ["#276f79", "#a8844f", "#735a73", "#53697f", "#08776d", "#aa6f58"];
 
 const navItems: Array<{ key: ViewKey; label: string; helper: string; icon: ReactNode }> = [
-  { key: "overview", label: "总览", helper: "本月状态", icon: <ChartLineUp size={20} /> },
-  { key: "quick", label: "AI 快记", helper: "一句话入账", icon: <Brain size={20} /> },
-  { key: "transactions", label: "流水", helper: "日期分组", icon: <Receipt size={20} /> },
-  { key: "analytics", label: "分析", helper: "趋势和占比", icon: <ChartPieSlice size={20} /> },
-  { key: "budget", label: "预算", helper: "风险线", icon: <ShieldCheck size={20} /> },
-  { key: "settings", label: "设置", helper: "API 和本地", icon: <GearSix size={20} /> },
+  { key: "overview", label: "总览", helper: "收支与预算", icon: <ChartLineUp size={20} /> },
+  { key: "quick", label: "AI 快记", helper: "一句话记账", icon: <Brain size={20} /> },
+  { key: "transactions", label: "流水", helper: "月度与周度", icon: <Receipt size={20} /> },
+  { key: "analytics", label: "分析", helper: "趋势与分布", icon: <ChartPieSlice size={20} /> },
+  { key: "budget", label: "预算", helper: "额度与建议", icon: <ShieldCheck size={20} /> },
+  { key: "settings", label: "设置", helper: "AI 模型", icon: <GearSix size={20} /> },
 ];
 
 const pageCopy: Record<ViewKey, { eyebrow: string; title: string; description: string }> = {
   overview: {
     eyebrow: "Command center",
-    title: "本月财务工作台",
-    description: "先看预算线和现金流，再进入快记、流水或分析页面。",
+    title: "本月财务总览",
+    description: "查看本月收支、预算余额和主要消费去向。",
   },
   quick: {
     eyebrow: "Quick entry",
     title: "一句话记账",
-    description: "AI 只生成待确认草稿，手动修改后再写入 SQLite。",
+    description: "描述一笔收入或支出，核对账单信息后保存。",
   },
   transactions: {
     eyebrow: "Ledger",
-    title: "日期分组流水",
-    description: "按天复盘消费场景，保留标签、账户和备注线索。",
+    title: "收支流水",
+    description: "按月或按周查看收入、支出和每笔明细。",
   },
   analytics: {
     eyebrow: "Analytics",
-    title: "图表与文字结论",
-    description: "每个图表旁边都有可直接阅读的金额、占比和趋势解释。",
+    title: "消费分析",
+    description: "查看消费趋势、分类占比和常用付款账户。",
   },
   budget: {
     eyebrow: "Budget",
-    title: "预算风险线",
-    description: "设置月度预算，查看使用率和 AI 财务建议。",
+    title: "月度预算",
+    description: "设置本月预算，查看剩余额度和消费建议。",
   },
   settings: {
     eyebrow: "Settings",
-    title: "接口与本地配置",
-    description: "查看主备接口状态；本地可保存配置，线上演示由服务器托管密钥。",
+    title: "AI 设置",
+    description: "配置用于智能记账和财务点评的模型服务。",
   },
 };
 
@@ -122,8 +124,13 @@ const defaultApiSettings: ApiSettingsDraft = {
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>("overview");
   const [month, setMonth] = useState(monthKey());
+  const [ledgerPeriod, setLedgerPeriod] = useState<LedgerPeriod>("month");
+  const [week, setWeek] = useState(isoWeekKey());
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [weeklyStats, setWeeklyStats] = useState<WeeklyStats | null>(null);
+  const [weeklyTransactions, setWeeklyTransactions] = useState<Transaction[]>([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [adviceSnapshot, setAdviceSnapshot] = useState<AdviceSnapshot>(emptyAdviceSnapshot);
   const [adviceBusy, setAdviceBusy] = useState<AdviceBusyState>("idle");
   const [adviceError, setAdviceError] = useState("");
@@ -172,7 +179,20 @@ function App() {
   const topAccount = displayStats.account_breakdown[0];
   const activeDays = Math.max(displayStats.daily_trend.length, 1);
   const averageDailyExpense = Math.round(displayStats.expense_cents / activeDays);
-  const groupedTransactions = useMemo(() => groupTransactionsByDate(transactions), [transactions]);
+  const weekRange = useMemo(() => isoWeekRange(week), [week]);
+  const ledgerTransactions = ledgerPeriod === "week" ? weeklyTransactions : transactions;
+  const groupedTransactions = useMemo(() => groupTransactionsByDate(ledgerTransactions), [ledgerTransactions]);
+  const ledgerSummary: LedgerSummary = ledgerPeriod === "week"
+    ? weeklyStats ?? { income_cents: 0, expense_cents: 0, balance_cents: 0, transaction_count: 0 }
+    : {
+        income_cents: displayStats.income_cents,
+        expense_cents: displayStats.expense_cents,
+        balance_cents: displayStats.balance_cents,
+        transaction_count: transactions.length,
+      };
+  const ledgerPeriodLabel = ledgerPeriod === "week"
+    ? formatWeekLabel(weekRange.start, weekRange.end)
+    : formatMonthLabel(month);
   const envPreview = [
     `OPENAI_COMPATIBLE_BASE_URL=${apiDraft.primary_base_url || "https://api.openai.com/v1"}`,
     `OPENAI_COMPATIBLE_MODEL=${apiDraft.primary_model || "your-model-name"}`,
@@ -209,6 +229,28 @@ function App() {
       setDataStatus("error");
     } finally {
       window.clearTimeout(wakeTimer);
+    }
+  }
+
+  async function refreshWeekly(resetData = false) {
+    setError("");
+    if (resetData) {
+      setWeeklyStats(null);
+      setWeeklyTransactions([]);
+    }
+    setWeeklyLoading(true);
+    const range = isoWeekRange(week);
+    try {
+      const [nextStats, nextTransactions] = await Promise.all([
+        api.weeklyStats(range.start),
+        api.listTransactionsByDateRange(range.start, range.end),
+      ]);
+      setWeeklyStats(nextStats);
+      setWeeklyTransactions(nextTransactions);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本周流水加载失败");
+    } finally {
+      setWeeklyLoading(false);
     }
   }
 
@@ -277,6 +319,10 @@ function App() {
   }, [month]);
 
   useEffect(() => {
+    if (activeView === "transactions" && ledgerPeriod === "week") refreshWeekly(true);
+  }, [activeView, ledgerPeriod, week]);
+
+  useEffect(() => {
     if (activeView === "overview" || activeView === "budget") loadCachedAdvice();
   }, [activeView, month, tone]);
 
@@ -321,6 +367,7 @@ function App() {
       setParsed(null);
       setDraft({ ...emptyDraft, occurred_at: new Date().toISOString() });
       await refresh();
+      if (ledgerPeriod === "week") await refreshWeekly();
       markAdviceStale();
       setActiveView(wasEditing ? "transactions" : "overview");
     } catch (err) {
@@ -348,6 +395,7 @@ function App() {
       await api.deleteTransaction(id);
       setPendingDelete(null);
       await refresh();
+      if (ledgerPeriod === "week") await refreshWeekly();
       markAdviceStale();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败，请稍后重试");
@@ -471,9 +519,9 @@ function App() {
               ))}
             </nav>
             <div className="rail-note">
-              <span>SQLite</span>
-              <strong>整数分存储</strong>
-              <small>{settingsStatus?.api_key_configured ? "模型接口已配置" : "本地规则可兜底"}</small>
+              <span>账本状态</span>
+              <strong>自动保存</strong>
+              <small>{settingsStatus?.api_key_configured ? "AI 快记已就绪" : "可手动记账"}</small>
             </div>
           </div>
         </aside>
@@ -486,11 +534,16 @@ function App() {
               <p>{page.description}</p>
             </div>
             <div className="top-actions">
-              <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+              {activeView === "transactions" && ledgerPeriod === "week" ? (
+                <input aria-label="选择统计周" type="week" value={week} onChange={(event) => setWeek(event.target.value)} />
+              ) : (
+                <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+              )}
               <button
                 className="icon-button"
                 onClick={() => {
-                  refresh();
+                  if (activeView === "transactions" && ledgerPeriod === "week") refreshWeekly();
+                  else refresh();
                   if (activeView === "overview" || activeView === "budget") loadCachedAdvice(true);
                 }}
                 aria-label="刷新"
@@ -543,10 +596,16 @@ function App() {
 
               {activeView === "transactions" && (
               <TransactionsPage
-                transactions={transactions}
+                transactions={ledgerTransactions}
                 groupedTransactions={groupedTransactions}
+                period={ledgerPeriod}
+                setPeriod={setLedgerPeriod}
+                periodLabel={ledgerPeriodLabel}
+                summary={ledgerSummary}
+                loading={weeklyLoading && ledgerPeriod === "week"}
                 editTransaction={editTransaction}
                 requestDelete={setPendingDelete}
+                onOpenQuick={() => setActiveView("quick")}
               />
               )}
 
@@ -627,10 +686,10 @@ function DataLoadState({ status, onRetry }: { status: DataStatus; onRetry: () =>
       <section className="panel recovery-state">
         <Database size={28} />
         <div>
-          <h2>暂时没有连接到后端</h2>
-          <p>免费实例可能仍在唤醒，也可以先进入 AI 快记填写草稿，稍后再保存。</p>
+          <h2>暂时无法读取账本</h2>
+          <p>服务暂时没有响应，请稍后重试。</p>
         </div>
-        <button className="primary-button" onClick={onRetry}>重新连接</button>
+        <button className="primary-button" onClick={onRetry}>重新加载账本</button>
       </section>
     );
   }
@@ -639,8 +698,8 @@ function DataLoadState({ status, onRetry }: { status: DataStatus; onRetry: () =>
       <div className="loading-copy">
         <span className="loading-pulse" />
         <div>
-          <h2>{status === "waking" ? "后端正在唤醒" : "正在读取本月账本"}</h2>
-          <p>{status === "waking" ? "Render 免费实例首次访问可能需要约一分钟。" : "正在加载流水、预算和统计。"}</p>
+          <h2>{status === "waking" ? "连接时间比平时稍长" : "正在打开账本"}</h2>
+          <p>{status === "waking" ? "服务正在恢复，请稍候。" : "正在同步本月流水和预算。"}</p>
         </div>
       </div>
       <div className="skeleton-grid" aria-hidden="true">
@@ -687,9 +746,9 @@ function DeleteTransactionDialog({
           <p>{transaction.note || transaction.category}，{transaction.type === "income" ? "+" : "-"}¥{centsToYuan(transaction.amount_cents)}</p>
         </div>
         <div className="dialog-actions">
-          <button className="ghost-button" onClick={onCancel} disabled={deleting}>取消</button>
+          <button className="ghost-button" onClick={onCancel} disabled={deleting}>保留流水</button>
           <button className="danger-button" onClick={() => onConfirm(transaction.id)} disabled={deleting}>
-            {deleting ? "删除中" : "确认删除"}
+            {deleting ? "正在删除" : "删除流水"}
           </button>
         </div>
       </>}
@@ -740,7 +799,7 @@ function OverviewPage({
       ? "点评待更新"
       : advice
         ? providerLabel(advice.provider)
-        : settingsStatus?.api_key_configured ? "点评待生成" : "本地规则待生成";
+        : settingsStatus?.api_key_configured ? "点评待生成" : "基础点评待生成";
   return (
     <div className="overview-page page-stack">
       <section className="command-board">
@@ -755,7 +814,7 @@ function OverviewPage({
             <strong className={displayStats.balance_cents >= 0 ? "positive" : "negative"}>
               {displayStats.balance_cents >= 0 ? "+" : "-"}¥{centsToYuan(Math.abs(displayStats.balance_cents))}
             </strong>
-            <p>{budgetStatus === "健康" ? "预算仍在安全范围内，继续保持记录频率。" : `预算状态: ${budgetStatus}`}</p>
+            <p>{budgetStatus === "健康" ? `本月预算剩余 ¥${centsToYuan(displayStats.budget_remaining_cents)}` : `本月预算${budgetStatus}`}</p>
             <div className="board-actions">
               <button className="primary-button" onClick={onOpenQuick}>
                 <Command size={18} />
@@ -769,9 +828,9 @@ function OverviewPage({
           </div>
         </div>
         <div className="board-side">
-          <StatusLine label="预算线" value={budgetStatus} />
-          <StatusLine label="AI 接口" value={aiRuntimeLabel} />
-          <StatusLine label="活跃记账日" value={`${activeDays} 天`} />
+          <StatusLine label="预算状态" value={budgetStatus} />
+          <StatusLine label="财务点评" value={aiRuntimeLabel} />
+          <StatusLine label="记账天数" value={`${activeDays} 天`} />
         </div>
       </section>
 
@@ -827,15 +886,16 @@ function QuickEntryPage({
   parseQuickEntry: () => void;
   saveDraft: (draft: TransactionDraft) => void;
 }) {
+  const missingFields = parsed?.missing_fields.map(fieldDisplayName).join("、") || "";
   return (
     <div className="quick-layout">
       <section className="panel quick-command">
         <div className="section-heading">
           <div>
-            <span className="kicker">自然语言输入</span>
-            <h2>先说人话，再确认字段</h2>
+            <span className="kicker">账单描述</span>
+            <h2>AI 解析语义，<span className="no-break">手动确认入账</span></h2>
           </div>
-          <span className="status-pill">{parsed ? "待确认" : "AI 解析"}</span>
+          <span className="status-pill">{parsed ? "待确认" : "等待输入"}</span>
         </div>
         <textarea
           value={quickText}
@@ -845,18 +905,15 @@ function QuickEntryPage({
         <div className="button-row">
           <button className="primary-button" onClick={parseQuickEntry} disabled={loading}>
             <Brain size={18} />
-            {loading ? "处理中" : "解析这句话"}
+            {loading ? "正在解析" : "解析账单"}
           </button>
         </div>
         {parsed && (
           <div className="parse-card">
             <CheckCircle size={20} weight="fill" />
             <div>
-              <strong>解析来源: {parsed.source === "model" ? providerLabel(parsed.provider) : "本地规则兜底"}</strong>
-              <span>
-                置信度 {(parsed.confidence * 100).toFixed(0)}%，
-                {parsed.missing_fields.length ? `缺失 ${parsed.missing_fields.join(", ")}` : "字段完整"}，确认后入账
-              </span>
+              <strong>{parseSourceLabel(parsed)}已完成解析</strong>
+              <span>{missingFields ? `请补充：${missingFields}` : "请核对右侧账单信息"}</span>
             </div>
           </div>
         )}
@@ -864,7 +921,7 @@ function QuickEntryPage({
       <section className="panel form-panel">
         <div className="section-heading">
           <div>
-            <span className="kicker">结构化账单</span>
+            <span className="kicker">账单信息</span>
             <h2>{editingId ? "编辑流水" : "确认入账"}</h2>
           </div>
         </div>
@@ -877,33 +934,76 @@ function QuickEntryPage({
 function TransactionsPage({
   transactions,
   groupedTransactions,
+  period,
+  setPeriod,
+  periodLabel,
+  summary,
+  loading,
   editTransaction,
   requestDelete,
+  onOpenQuick,
 }: {
   transactions: Transaction[];
   groupedTransactions: TransactionDateGroup[];
+  period: LedgerPeriod;
+  setPeriod: (period: LedgerPeriod) => void;
+  periodLabel: string;
+  summary: LedgerSummary;
+  loading: boolean;
   editTransaction: (item: Transaction) => void;
   requestDelete: (item: Transaction) => void;
+  onOpenQuick: () => void;
 }) {
   return (
-    <section className="panel ledger-panel">
+    <section className="panel ledger-panel" aria-busy={loading}>
       <div className="section-heading">
         <div>
-          <span className="kicker">Ledger</span>
-          <h2>流水列表</h2>
+          <span className="kicker">收支明细</span>
+          <h2>{period === "week" ? "周度流水" : "月度流水"}</h2>
         </div>
-        <span className="status-pill">{transactions.length} 笔</span>
+        <div className="ledger-heading-actions">
+          <div className="segmented" aria-label="流水统计周期">
+            <button aria-pressed={period === "month"} className={period === "month" ? "selected" : ""} onClick={() => setPeriod("month")}>按月</button>
+            <button aria-pressed={period === "week"} className={period === "week" ? "selected" : ""} onClick={() => setPeriod("week")}>按周</button>
+          </div>
+          <span className="status-pill">{summary.transaction_count} 笔</span>
+        </div>
       </div>
-      <div className="transaction-list">
+      <div className="ledger-summary" aria-label={`${periodLabel}收支统计`}>
+        <div className="ledger-period-label">
+          <span>统计周期</span>
+          <strong>{periodLabel}</strong>
+        </div>
+        <div>
+          <span>收入</span>
+          <strong className="positive">+¥{centsToYuan(summary.income_cents)}</strong>
+        </div>
+        <div>
+          <span>支出</span>
+          <strong className="negative">-¥{centsToYuan(summary.expense_cents)}</strong>
+        </div>
+        <div>
+          <span>净额</span>
+          <strong className={summary.balance_cents >= 0 ? "positive" : "negative"}>
+            {summary.balance_cents >= 0 ? "+" : "-"}¥{centsToYuan(Math.abs(summary.balance_cents))}
+          </strong>
+        </div>
+      </div>
+      {loading ? (
+        <div className="ledger-loading">正在读取本周流水</div>
+      ) : <div className="transaction-list">
         {transactions.length === 0 ? (
-          <div className="empty-state">这个月还没有账单，先记一笔。</div>
+          <div className="ledger-empty">
+            <span>{period === "week" ? "本周暂无流水。" : "本月暂无流水。"}</span>
+            <button className="ghost-button" onClick={onOpenQuick}>记录一笔</button>
+          </div>
         ) : (
           groupedTransactions.map((group) => (
             <section className="date-group" key={group.date}>
               <div className="date-header">
                 <div>
                   <strong>{formatDay(group.date)}</strong>
-                  <span>{group.items.length} 笔 / 支出 ¥{centsToYuan(group.expense_cents)} / 收入 ¥{centsToYuan(group.income_cents)}</span>
+                  <span>{group.items.length} 笔 · 支出 ¥{centsToYuan(group.expense_cents)} · 收入 ¥{centsToYuan(group.income_cents)}</span>
                 </div>
                 <b className={group.income_cents - group.expense_cents >= 0 ? "positive" : "negative"}>
                   {group.income_cents - group.expense_cents >= 0 ? "+" : "-"}¥{centsToYuan(Math.abs(group.income_cents - group.expense_cents))}
@@ -930,7 +1030,7 @@ function TransactionsPage({
             </section>
           ))
         )}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -1077,22 +1177,22 @@ function AdvicePanelContent({
   const badge = isGenerating
     ? "分析中"
     : busy === "cache"
-      ? "读取缓存"
+      ? "读取中"
       : snapshot.status === "stale"
         ? "待更新"
         : advice ? providerLabel(advice.provider) : "尚未生成";
   const headline = advice?.headline || advice?.advice || (isGenerating ? "正在生成本月点评" : "本月还没有 AI 点评");
   const detail = advice?.detail || (
     isGenerating
-      ? "AI 正在根据已确认的账单和预算生成结论，生成成功后会保存到 SQLite。"
-      : "点击生成后才会调用模型；如果本月数据没有变化，下次会直接展示已保存的结果。"
+      ? "正在分析本月收支和预算，请稍候。"
+      : "生成一份基于本月收支与预算的财务建议。"
   );
-  let cacheMessage = "不会自动调用模型";
-  if (busy === "cache") cacheMessage = "正在读取 SQLite 中的已保存点评";
-  else if (isGenerating) cacheMessage = "本次由用户手动触发，生成后自动缓存";
-  else if (snapshot.status === "stale") cacheMessage = "账单或预算已变化，当前点评基于上一版数据";
-  else if (advice?.source === "error_fallback") cacheMessage = "模型调用失败，本次兜底结果未写入缓存";
-  else if (snapshot.generated_at) cacheMessage = `数据未变化，直接读取 ${formatAdviceTime(snapshot.generated_at)} 的结果`;
+  let statusMessage = "尚未生成本月点评";
+  if (busy === "cache") statusMessage = "正在读取本月点评";
+  else if (isGenerating) statusMessage = "正在生成新的财务点评";
+  else if (snapshot.status === "stale") statusMessage = "本月账单已变化，建议重新分析";
+  else if (advice?.source === "error_fallback") statusMessage = "AI 暂时不可用，已提供基础建议";
+  else if (snapshot.generated_at) statusMessage = `更新于 ${formatAdviceTime(snapshot.generated_at)}`;
 
   return <>
     <div className="panel-title">
@@ -1105,8 +1205,8 @@ function AdvicePanelContent({
       <p>{detail}</p>
     </div>
     <div className={`advice-cache-state ${snapshot.status}`}>
-      <Database size={16} />
-      <span>{cacheMessage}</span>
+      <CheckCircle size={16} />
+      <span>{statusMessage}</span>
     </div>
     {showActions && advice?.action_items?.length ? (
       <div className="action-list">
@@ -1175,19 +1275,19 @@ function SettingsPage({
     <section className="panel settings-panel">
       <div className="section-heading">
         <div>
-          <span className="kicker">Runtime</span>
-          <h2>API 运行配置</h2>
+          <span className="kicker">模型服务</span>
+          <h2>AI 模型配置</h2>
         </div>
         <span className="status-pill">
-          {!settingsStatus ? "状态未连接" : writable ? settingsStatus.primary_api_key_configured ? "主 Key 已配置" : "主 Key 未配置" : "线上只读"}
+          {!settingsStatus ? "正在读取" : writable ? settingsStatus.primary_api_key_configured ? "主模型已就绪" : "主模型未配置" : "在线只读"}
         </span>
       </div>
       <div className="settings-layout">
         <div className="settings-status">
           <div>
             <Database size={20} />
-            <span>SQLite 文件</span>
-            <strong>{settingsStatus?.database_file || "pocket_ledger.db"}</strong>
+            <span>账本数据</span>
+            <strong>自动保存</strong>
           </div>
           <div>
             <Key size={20} />
@@ -1205,15 +1305,15 @@ function SettingsPage({
             <div className="readonly-notice">
               <ShieldCheck size={20} />
               <div>
-                <strong>公开演示已锁定配置写入</strong>
-                <span>模型和 Key 由 Render 环境变量管理，浏览器只显示非敏感状态。</span>
+                <strong>在线演示仅可查看</strong>
+                <span>此演示站点不支持修改 AI 设置，密钥始终隐藏。</span>
               </div>
             </div>
           )}
           <div className="settings-group">
-            <span className="form-caption">Primary</span>
+            <span className="form-caption">主模型</span>
             <label className="field-block">
-              <span>主 Base URL</span>
+              <span>接口地址</span>
               <input
                 value={apiDraft.primary_base_url}
                 onChange={(event) => setApiDraft({ ...apiDraft, primary_base_url: event.target.value })}
@@ -1222,7 +1322,7 @@ function SettingsPage({
               />
             </label>
             <label className="field-block">
-              <span>主 Model</span>
+              <span>模型名称</span>
               <input
                 value={apiDraft.primary_model}
                 onChange={(event) => setApiDraft({ ...apiDraft, primary_model: event.target.value })}
@@ -1231,19 +1331,19 @@ function SettingsPage({
               />
             </label>
             {writable === true && <label className="field-block">
-              <span>主 API Key</span>
+              <span>API Key</span>
               <input
                 type="password"
                 value={apiSecretDraft}
                 onChange={(event) => setApiSecretDraft(event.target.value)}
-                placeholder={settingsStatus?.primary_api_key_configured ? "已配置，留空则保留" : "输入主 Key"}
+                placeholder={settingsStatus?.primary_api_key_configured ? "已配置，留空则保留" : "输入 API Key"}
               />
             </label>}
           </div>
           <div className="settings-group">
-            <span className="form-caption">Backup</span>
+            <span className="form-caption">备用模型</span>
             <label className="field-block">
-              <span>备用 Base URL</span>
+              <span>接口地址</span>
               <input
                 value={apiDraft.backup_base_url}
                 onChange={(event) => setApiDraft({ ...apiDraft, backup_base_url: event.target.value })}
@@ -1252,7 +1352,7 @@ function SettingsPage({
               />
             </label>
             <label className="field-block">
-              <span>备用 Model</span>
+              <span>模型名称</span>
               <input
                 value={apiDraft.backup_model}
                 onChange={(event) => setApiDraft({ ...apiDraft, backup_model: event.target.value })}
@@ -1261,17 +1361,17 @@ function SettingsPage({
               />
             </label>
             {writable === true && <label className="field-block">
-              <span>备用 API Key</span>
+              <span>API Key</span>
               <input
                 type="password"
                 value={backupSecretDraft}
                 onChange={(event) => setBackupSecretDraft(event.target.value)}
-                placeholder={settingsStatus?.backup_api_key_configured ? "已配置，留空则保留" : "输入备用 Key"}
+                placeholder={settingsStatus?.backup_api_key_configured ? "已配置，留空则保留" : "输入备用 API Key"}
               />
             </label>}
           </div>
           <label className="field-block">
-            <span>超时秒数</span>
+            <span>超时时间（秒）</span>
             <input
               type="number"
               min="5"
@@ -1283,10 +1383,10 @@ function SettingsPage({
             />
           </label>
           <div className="settings-actions">
-            {writable === true && <button className="primary-button" onClick={saveApiSettings}>{settingsSaved ? "已保存到后端" : "保存真实配置"}</button>}
+            {writable === true && <button className="primary-button" onClick={saveApiSettings}>{settingsSaved ? "配置已保存" : "保存 AI 配置"}</button>}
             <button className="ghost-button" onClick={testAiProviders} disabled={providerTesting}>
               <ArrowClockwise size={18} />
-              {providerTesting ? "测试中" : "测试主备接口"}
+              {providerTesting ? "正在测试" : "测试模型连接"}
             </button>
           </div>
           <div className="provider-test-list">
@@ -1315,7 +1415,7 @@ function SettingsPage({
                   <span>{result.provider === "primary" ? "主模型" : "备用模型"}</span>
                   <strong>{result.model || "未配置"}</strong>
                 </div>
-                <em>{result.ok ? `${result.latency_ms}ms` : result.configured ? "待确认" : "未配置"}</em>
+                <em>{result.ok ? `${result.latency_ms}ms` : result.configured ? "未测试" : "未配置"}</em>
                 <small>{result.message}</small>
               </div>
             ))}
@@ -1325,8 +1425,8 @@ function SettingsPage({
           writable === true
             ? envPreview
             : writable === false
-              ? "线上演示模式\nAI 配置来源: Render Environment Variables\n浏览器写入: disabled\n真实 Key: never exposed"
-              : "正在读取后端设置状态..."
+              ? `在线演示配置\n主模型：${settingsStatus?.primary_model || "未配置"}\n备用模型：${settingsStatus?.backup_model || "未启用"}\n配置权限：只读\n密钥：已隐藏`
+              : "正在读取 AI 配置..."
         }</pre>
       </div>
     </section>
@@ -1367,8 +1467,26 @@ function StatusLine({ label, value }: { label: string; value: string }) {
 function providerLabel(provider: ParseResult["provider"] | AdviceResponse["provider"]): string {
   if (provider === "primary") return "主模型";
   if (provider === "backup") return "备用模型";
-  if (provider === "fallback") return "失败兜底";
-  return "本地规则";
+  if (provider === "fallback") return "基础建议";
+  return "本地解析";
+}
+
+function parseSourceLabel(result: ParseResult): string {
+  if (result.source === "model") return providerLabel(result.provider);
+  if (result.source === "error_fallback") return "基础解析";
+  return "本地解析";
+}
+
+function fieldDisplayName(field: string): string {
+  const labels: Record<string, string> = {
+    amount_cents: "金额",
+    type: "收支类型",
+    category: "分类",
+    account: "账户",
+    occurred_at: "时间",
+    note: "备注",
+  };
+  return labels[field] || field;
 }
 
 function TransactionForm({
@@ -1566,6 +1684,26 @@ function groupTransactionsByDate(items: Transaction[]): TransactionDateGroup[] {
     groups.set(date, group);
   }
   return Array.from(groups.values()).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+function formatMonthLabel(month: string): string {
+  const [year, monthNumber] = month.split("-");
+  return `${year}年${Number(monthNumber)}月`;
+}
+
+function formatWeekLabel(start: string, end: string): string {
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  const startLabel = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).format(startDate);
+  const endLabel = new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+  }).format(endDate);
+  return `${startLabel} - ${endLabel}`;
 }
 
 function formatDay(date: string) {

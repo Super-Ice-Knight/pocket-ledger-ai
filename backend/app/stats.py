@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from .repository import list_transactions, get_budget
 
 
@@ -33,6 +33,27 @@ def monthly_stats(conn: sqlite3.Connection, month: str | None = None) -> dict:
     }
 
 
+def weekly_stats(conn: sqlite3.Connection, anchor: date | None = None) -> dict:
+    target_date = anchor or date.today()
+    week_start = target_date - timedelta(days=target_date.weekday())
+    week_end = week_start + timedelta(days=6)
+    transactions = list_transactions(
+        conn,
+        start_date=week_start.isoformat(),
+        end_date=week_end.isoformat(),
+    )
+    income = sum(item["amount_cents"] for item in transactions if item["type"] == "income")
+    expense = sum(item["amount_cents"] for item in transactions if item["type"] == "expense")
+    return {
+        "week_start": week_start,
+        "week_end": week_end,
+        "income_cents": income,
+        "expense_cents": expense,
+        "balance_cents": income - expense,
+        "transaction_count": len(transactions),
+    }
+
+
 def aggregate(transactions: list[dict], key: str) -> list[dict]:
     buckets: dict[str, int] = {}
     for item in transactions:
@@ -52,4 +73,3 @@ def daily_trend(transactions: list[dict]) -> list[dict]:
         else:
             buckets[day]["expense_cents"] += item["amount_cents"]
     return [buckets[day] for day in sorted(buckets)]
-

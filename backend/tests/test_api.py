@@ -88,6 +88,53 @@ def test_transaction_can_be_created_and_retrieved(tmp_path: Path):
     assert created["tags"] == ["宿舍", "高频"]
 
 
+def test_weekly_ledger_includes_monday_to_sunday_only(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "weekly.db"))
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+
+    entries = [
+        ("2026-07-05T09:00:00", "expense", 100, "上周日"),
+        ("2026-07-06T09:00:00", "income", 10000, "周一收入"),
+        ("2026-07-08T12:00:00", "expense", 2500, "周三午餐"),
+        ("2026-07-12T18:00:00", "expense", 500, "周日饮品"),
+        ("2026-07-13T09:00:00", "expense", 900, "下周一"),
+    ]
+    for occurred_at, tx_type, amount_cents, note in entries:
+        response = client.post(
+            "/api/transactions",
+            json={
+                "amount_cents": amount_cents,
+                "type": tx_type,
+                "category": "其他",
+                "account": "现金",
+                "occurred_at": occurred_at,
+                "note": note,
+                "raw_text": note,
+                "tags": [],
+            },
+        )
+        assert response.status_code == 200
+
+    stats_response = client.get("/api/stats/weekly?date=2026-07-08")
+    ledger_response = client.get("/api/transactions?start_date=2026-07-06&end_date=2026-07-12")
+    invalid_range_response = client.get("/api/transactions?start_date=2026-07-12&end_date=2026-07-06")
+
+    assert stats_response.status_code == 200
+    assert stats_response.json() == {
+        "week_start": "2026-07-06",
+        "week_end": "2026-07-12",
+        "income_cents": 10000,
+        "expense_cents": 3000,
+        "balance_cents": 7000,
+        "transaction_count": 3,
+    }
+    assert ledger_response.status_code == 200
+    assert [item["note"] for item in ledger_response.json()] == ["周日饮品", "周三午餐", "周一收入"]
+    assert invalid_range_response.status_code == 422
+
+
 def test_health_endpoint():
     client = TestClient(app)
     response = client.get("/api/health")

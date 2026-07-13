@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import date
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -25,6 +26,7 @@ from .schemas import (
     Budget,
     BudgetCreate,
     MonthlyStats,
+    WeeklyStats,
     AdviceResponse,
     AdviceSnapshot,
     AdviceTone,
@@ -33,7 +35,7 @@ from .schemas import (
     AiProviderTestRequest,
     AiProviderTestResult,
 )
-from .stats import monthly_stats, current_month
+from .stats import monthly_stats, weekly_stats, current_month
 from .config import get_settings
 
 
@@ -101,12 +103,24 @@ def create_transaction_endpoint(payload: TransactionCreate) -> dict:
 @app.get("/api/transactions", response_model=list[Transaction])
 def list_transactions_endpoint(
     month: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     type: str | None = Query(default=None),
     category: str | None = None,
     account: str | None = None,
 ) -> list[dict]:
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
     with get_connection() as conn:
-        return list_transactions(conn, month=month, tx_type=type, category=category, account=account)
+        return list_transactions(
+            conn,
+            month=month,
+            start_date=start_date.isoformat() if start_date else None,
+            end_date=end_date.isoformat() if end_date else None,
+            tx_type=type,
+            category=category,
+            account=account,
+        )
 
 
 @app.put("/api/transactions/{transaction_id}", response_model=Transaction)
@@ -132,6 +146,12 @@ def delete_transaction_endpoint(transaction_id: int) -> dict:
 def monthly_stats_endpoint(month: str | None = None) -> dict:
     with get_connection() as conn:
         return monthly_stats(conn, month or current_month())
+
+
+@app.get("/api/stats/weekly", response_model=WeeklyStats)
+def weekly_stats_endpoint(anchor: date | None = Query(default=None, alias="date")) -> dict:
+    with get_connection() as conn:
+        return weekly_stats(conn, anchor)
 
 
 @app.post("/api/budgets", response_model=Budget)

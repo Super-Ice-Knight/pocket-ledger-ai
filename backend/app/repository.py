@@ -101,6 +101,8 @@ def delete_transaction(conn: sqlite3.Connection, transaction_id: int) -> None:
 def list_transactions(
     conn: sqlite3.Connection,
     month: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     tx_type: str | None = None,
     category: str | None = None,
     account: str | None = None,
@@ -110,6 +112,12 @@ def list_transactions(
     if month:
         clauses.append("substr(occurred_at, 1, 7) = ?")
         params.append(month)
+    if start_date:
+        clauses.append("substr(occurred_at, 1, 10) >= ?")
+        params.append(start_date)
+    if end_date:
+        clauses.append("substr(occurred_at, 1, 10) <= ?")
+        params.append(end_date)
     if tx_type:
         clauses.append("type = ?")
         params.append(tx_type)

@@ -626,6 +626,10 @@ textarea:focus {
   letter-spacing: -0.025em;
 }
 
+.no-break {
+  white-space: nowrap;
+}
+
 .panel-title {
   justify-content: flex-start;
   color: var(--accent-ink);
@@ -986,6 +990,70 @@ textarea {
   max-height: 70dvh;
   overflow: auto;
   padding-right: 4px;
+}
+
+.ledger-heading-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ledger-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(120px, 1fr));
+  margin-bottom: 18px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgb(231 238 240 / 0.42);
+}
+
+.ledger-summary > div {
+  min-width: 0;
+  padding: 14px 16px;
+  border-left: 1px solid var(--line);
+  display: grid;
+  align-content: center;
+  gap: 5px;
+}
+
+.ledger-summary > div:first-child {
+  border-left: 0;
+}
+
+.ledger-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ledger-summary strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-summary .positive {
+  color: var(--positive);
+}
+
+.ledger-summary .negative {
+  color: var(--danger);
+}
+
+.ledger-period-label strong {
+  font-size: 15px;
+}
+
+.ledger-loading,
+.ledger-empty {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  color: var(--muted);
 }
 
 .date-group {
@@ -1765,5 +1833,46 @@ textarea {
 
   .transaction-list {
     max-height: none;
+  }
+
+  .ledger-heading-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .ledger-panel .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ledger-panel .section-heading h2 {
+    white-space: nowrap;
+  }
+
+  .ledger-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ledger-summary .ledger-period-label {
+    grid-column: 1 / -1;
+  }
+
+  .ledger-summary > div:nth-child(2) {
+    border-left: 0;
+  }
+
+  .ledger-summary strong {
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .ledger-summary > div {
+    padding: 12px 8px;
+  }
+
+  .date-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
   }
 }

@@ -1,4 +1,4 @@
-import type { AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, BudgetPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction } from "./types";
+import type { AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, BudgetPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, WeeklyStats } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -19,7 +19,7 @@ async function responseErrorMessage(response: Response): Promise<string> {
   } catch {
     // The fallback below keeps server internals out of the interface.
   }
-  if (response.status >= 500) return "后端暂时不可用，请稍后重试。";
+  if (response.status >= 500) return "服务暂时不可用，请稍后重试。";
   return `请求失败（${response.status}）`;
 }
 
@@ -54,7 +54,7 @@ async function request<T>(path: string, options: ApiRequestOptions = {}): Promis
       }
       if (isAbort) throw new Error("请求等待时间过长，请稍后重试。");
       if (isNetworkError) {
-        throw new Error("暂时无法连接后端，免费实例可能正在唤醒，请稍后重试。");
+        throw new Error("暂时无法连接账本服务，请稍后重试。");
       }
       throw error instanceof Error ? error : new Error("请求失败，请稍后重试。");
     } finally {
@@ -92,8 +92,15 @@ export const api = {
   listTransactions(month: string) {
     return request<Transaction[]>(`/api/transactions?month=${month}`);
   },
+  listTransactionsByDateRange(startDate: string, endDate: string) {
+    const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+    return request<Transaction[]>(`/api/transactions?${params.toString()}`);
+  },
   monthlyStats(month: string) {
     return request<MonthlyStats>(`/api/stats/monthly?month=${month}`);
+  },
+  weeklyStats(date: string) {
+    return request<WeeklyStats>(`/api/stats/weekly?date=${date}`);
   },
   setBudget(payload: BudgetPayload) {
     return request("/api/budgets", {

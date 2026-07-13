@@ -61,7 +61,7 @@
 
 ## GET /api/transactions
 
-查询账单，支持 `month`、`type`、`category`、`account` 参数。
+查询账单，支持 `month`、`start_date`、`end_date`、`type`、`category`、`account` 参数。`start_date` 与 `end_date` 使用 `YYYY-MM-DD`，边界均包含；开始日期晚于结束日期时返回 `422`。月度页面使用 `month`，周度页面使用日期范围，二者不在同一次前端请求中混用。
 
 ## PUT /api/transactions/{id}
 
@@ -74,6 +74,21 @@
 ## GET /api/stats/monthly
 
 查询月度统计，参数 `month=YYYY-MM`。
+
+## GET /api/stats/weekly
+
+查询指定日期所在周的基础统计，参数 `date=YYYY-MM-DD`。一周固定为周一到周日，即使横跨两个月也不截断。
+
+```json
+{
+  "week_start": "2026-07-06",
+  "week_end": "2026-07-12",
+  "income_cents": 10000,
+  "expense_cents": 3000,
+  "balance_cents": 7000,
+  "transaction_count": 3
+}
+```
 
 ## POST /api/budgets
 

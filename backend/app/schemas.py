@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
@@ -94,6 +94,15 @@ class MonthlyStats(BaseModel):
     account_breakdown: list[dict]
     daily_trend: list[dict]
     recent_transactions: list[Transaction]
+
+
+class WeeklyStats(BaseModel):
+    week_start: date
+    week_end: date
+    income_cents: int
+    expense_cents: int
+    balance_cents: int
+    transaction_count: int
 
 
 class AdviceResponse(BaseModel):

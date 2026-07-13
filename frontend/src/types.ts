@@ -36,6 +36,15 @@ export interface MonthlyStats {
   recent_transactions: Transaction[];
 }
 
+export interface WeeklyStats {
+  week_start: string;
+  week_end: string;
+  income_cents: number;
+  expense_cents: number;
+  balance_cents: number;
+  transaction_count: number;
+}
+
 export interface BudgetPayload {
   month: string;
   limit_cents: number;
