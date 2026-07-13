@@ -6,6 +6,7 @@ class MoneyParseError(ValueError):
     pass
 
 
+MAX_TRANSACTION_AMOUNT_CENTS = 9_999_999_999
 AMOUNT_PATTERN = r"\d+(?:\.\d{1,4})?"
 
 
@@ -19,8 +20,10 @@ def parse_yuan_to_cents(value: str | int | float | Decimal) -> int:
     except InvalidOperation as exc:
         raise MoneyParseError("金额格式非法") from exc
     cents = (yuan * Decimal("100")).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    if cents < 0:
-        raise MoneyParseError("金额不能为负数")
+    if cents <= 0:
+        raise MoneyParseError("金额必须大于 0 元")
+    if cents > MAX_TRANSACTION_AMOUNT_CENTS:
+        raise MoneyParseError("金额不能超过 99,999,999.99 元")
     return int(cents)
 
 

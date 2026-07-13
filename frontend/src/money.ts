@@ -1,3 +1,7 @@
+import { currentBusinessDateTimeLocal } from "./businessTime";
+
+export const MAX_TRANSACTION_AMOUNT_CENTS = 9_999_999_999;
+
 export function centsToYuan(cents: number): string {
   return (cents / 100).toLocaleString("zh-CN", {
     minimumFractionDigits: 2,
@@ -11,16 +15,21 @@ export function yuanTextToCents(text: string): number {
     throw new Error("请输入正确金额，例如 19.90");
   }
   const [yuan, cent = ""] = text.trim().split(".");
-  return Number(yuan) * 100 + Number(cent.padEnd(2, "0"));
+  const amountCents = Number(yuan) * 100 + Number(cent.padEnd(2, "0"));
+  if (amountCents <= 0) throw new Error("金额必须大于 0 元");
+  if (amountCents > MAX_TRANSACTION_AMOUNT_CENTS) {
+    throw new Error("金额不能超过 99,999,999.99 元");
+  }
+  return amountCents;
 }
 
 export function monthKey(date = new Date()): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  return `${date.getFullYear()}-${month}`;
+  return currentBusinessDateTimeLocal(date).slice(0, 7);
 }
 
 export function isoWeekKey(date = new Date()): string {
-  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const [year, month, day] = currentBusinessDateTimeLocal(date).slice(0, 10).split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1, day));
   const weekday = target.getUTCDay() || 7;
   target.setUTCDate(target.getUTCDate() + 4 - weekday);
   const isoYear = target.getUTCFullYear();

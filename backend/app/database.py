@@ -3,15 +3,17 @@ from __future__ import annotations
 import sqlite3
 import json
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
+
+from .business_time import business_now
 from .config import get_settings
 
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    amount_cents INTEGER NOT NULL CHECK(amount_cents >= 0),
+    amount_cents INTEGER NOT NULL CHECK(amount_cents > 0 AND amount_cents <= 9999999999),
     type TEXT NOT NULL CHECK(type IN ('expense', 'income')),
     category TEXT NOT NULL,
     account TEXT NOT NULL,
@@ -45,6 +47,20 @@ CREATE TABLE IF NOT EXISTS ai_advice_cache (
     generated_at TEXT NOT NULL,
     PRIMARY KEY(month, tone)
 );
+
+CREATE TRIGGER IF NOT EXISTS transactions_amount_insert_guard
+BEFORE INSERT ON transactions
+WHEN NEW.amount_cents <= 0 OR NEW.amount_cents > 9999999999
+BEGIN
+    SELECT RAISE(ABORT, 'transaction amount out of range');
+END;
+
+CREATE TRIGGER IF NOT EXISTS transactions_amount_update_guard
+BEFORE UPDATE OF amount_cents ON transactions
+WHEN NEW.amount_cents <= 0 OR NEW.amount_cents > 9999999999
+BEGIN
+    SELECT RAISE(ABORT, 'transaction amount out of range');
+END;
 """
 
 
@@ -86,13 +102,22 @@ def get_connection():
 
 def seed_demo_data(db_path: Path | None = None) -> None:
     with connect(db_path) as conn:
-        now = datetime.now().replace(minute=0, second=0, microsecond=0)
+        completed = conn.execute(
+            "SELECT value FROM app_settings WHERE key = 'demo_seed_completed'"
+        ).fetchone()
+        if completed:
+            return
+
+        now = business_now().replace(minute=0, second=0)
         month = now.strftime("%Y-%m")
-        count = conn.execute(
-            "SELECT COUNT(*) AS c FROM transactions WHERE substr(occurred_at, 1, 7) = ?",
-            (month,),
-        ).fetchone()["c"]
-        if count:
+        transaction_count = conn.execute("SELECT COUNT(*) AS c FROM transactions").fetchone()["c"]
+        budget_count = conn.execute("SELECT COUNT(*) AS c FROM budgets").fetchone()["c"]
+        if transaction_count or budget_count:
+            conn.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+                ("demo_seed_completed", "true", now.isoformat()),
+            )
+            conn.commit()
             return
         max_offset = max(now.day - 1, 0)
 
@@ -126,5 +151,9 @@ def seed_demo_data(db_path: Path | None = None) -> None:
             VALUES (?, NULL, ?, ?)
             """,
             (month, 180000, now.isoformat()),
+        )
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("demo_seed_completed", "true", now.isoformat()),
         )
         conn.commit()

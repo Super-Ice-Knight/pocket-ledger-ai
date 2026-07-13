@@ -21,5 +21,7 @@ services:
         value: "10"
       - key: RUNTIME_AI_SETTINGS_WRITABLE
         value: "false"
+      - key: SEED_DEMO_DATA
+        value: "true"
       - key: CORS_ALLOWED_ORIGINS
         value: https://pocket-ledger-ai.vercel.app

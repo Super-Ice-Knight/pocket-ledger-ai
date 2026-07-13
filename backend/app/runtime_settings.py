@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 import sqlite3
 
+from .business_time import business_now
 from .config import get_settings
 from .database import connect
 from .schemas import AiSettingsUpdate, SettingsStatus
@@ -133,7 +133,7 @@ def _read_settings(conn: sqlite3.Connection | None = None) -> dict[str, str]:
 
 
 def _write_settings(conn: sqlite3.Connection, values: dict[str, str]) -> None:
-    now = datetime.now().isoformat()
+    now = business_now().isoformat()
     conn.executemany(
         """
         INSERT INTO app_settings (key, value, updated_at)

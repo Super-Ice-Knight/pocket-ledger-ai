@@ -3,8 +3,11 @@
 ## 通用约定
 
 - 后端地址：`http://localhost:8000`
-- 时间格式：ISO 8601 字符串
+- 业务时区：`Asia/Shanghai`
+- 时间格式：带 `+08:00` 偏移的 ISO 8601 字符串。无时区输入按北京时间解释，其他偏移输入会先转换为北京时间。
 - 金额格式：统一使用 `amount_cents`，单位为分，类型为整数
+- 交易金额：创建和更新时必须为 `1–9,999,999,999` 分；AI 未识别金额的解析草稿可以返回 `0`，但不能保存为流水。
+- 月份格式：严格为 `YYYY-MM`，月份只能是 `01–12`。
 
 ## POST /api/ai/parse-transaction
 
@@ -24,7 +27,7 @@
   "type": "expense",
   "category": "餐饮",
   "account": "微信",
-  "occurred_at": "2026-07-12T12:00:00",
+  "occurred_at": "2026-07-12T12:00:00+08:00",
   "note": "疯狂星期四",
   "raw_text": "今天中午和室友吃疯狂星期四花了 50 块，微信付的",
   "tags": [],
@@ -42,6 +45,8 @@
 
 分类会归一化到餐饮、饮品、交通、娱乐、学习、购物、住房、医疗、兼职、收入或其他；账户会归一化到微信、支付宝、银行卡、现金或未指定。
 
+模型字段完成本地归一化后，后端会重新计算必填缺失项：金额不大于 0、分类无法识别、账户未指定、时间缺失或非法都会加入 `missing_fields`，并与模型自报结果合并去重。Provider 返回的未知字段不会绕过用户确认。
+
 ## POST /api/transactions
 
 创建账单。请求体字段：
@@ -52,7 +57,7 @@
   "type": "expense",
   "category": "餐饮",
   "account": "微信",
-  "occurred_at": "2026-07-12T12:00:00",
+  "occurred_at": "2026-07-12T12:00:00+08:00",
   "note": "疯狂星期四",
   "raw_text": "今天中午和室友吃疯狂星期四花了 50 块，微信付的",
   "tags": ["社交", "高频"]
@@ -61,11 +66,11 @@
 
 ## GET /api/transactions
 
-查询账单，支持 `month`、`start_date`、`end_date`、`type`、`category`、`account` 参数。`start_date` 与 `end_date` 使用 `YYYY-MM-DD`，边界均包含；开始日期晚于结束日期时返回 `422`。月度页面使用 `month`，周度页面使用日期范围，二者不在同一次前端请求中混用。
+查询账单，支持 `month`、`start_date`、`end_date`、`type`、`category`、`account` 参数。`start_date` 与 `end_date` 使用 `YYYY-MM-DD`，边界均包含；开始日期晚于结束日期、日期非法、月份非法或范围超过 366 天时返回 `422`。月度页面使用 `month`，周度页面使用日期范围，二者不在同一次前端请求中混用。
 
 ## PUT /api/transactions/{id}
 
-更新账单。
+更新账单，字段约束与创建一致。修改 `occurred_at` 后，日期分组、月统计和周统计会按新的北京时间重新计算。
 
 ## DELETE /api/transactions/{id}
 
@@ -129,7 +134,7 @@
     "source": "model",
     "provider": "primary"
   },
-  "generated_at": "2026-07-13T03:20:00+00:00"
+  "generated_at": "2026-07-13T11:20:00+08:00"
 }
 ```
 

@@ -18,6 +18,7 @@ import {
   Tag,
   Trash,
   Wallet,
+  X,
 } from "@phosphor-icons/react";
 import {
   Area,
@@ -32,6 +33,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "./api";
+import { apiIsoToDateTimeLocal, businessDateKey, businessTimeLabel, currentBusinessIso, dateTimeLocalToApiIso } from "./businessTime";
 import { centsToYuan, isoWeekKey, isoWeekRange, monthKey, yuanTextToCents } from "./money";
 import type { AdviceResponse, AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType, WeeklyStats } from "./types";
 
@@ -48,16 +50,18 @@ const emptyAdviceSnapshot: AdviceSnapshot = {
   generated_at: null,
 };
 
-const emptyDraft: TransactionDraft = {
-  amount_cents: 0,
-  type: "expense",
-  category: "餐饮",
-  account: "微信",
-  occurred_at: new Date().toISOString(),
-  note: "",
-  raw_text: "",
-  tags: [],
-};
+function createEmptyDraft(): TransactionDraft {
+  return {
+    amount_cents: 0,
+    type: "expense",
+    category: "餐饮",
+    account: "微信",
+    occurred_at: currentBusinessIso(),
+    note: "",
+    raw_text: "",
+    tags: [],
+  };
+}
 
 const categories = ["餐饮", "饮品", "交通", "娱乐", "学习", "购物", "住房", "医疗", "兼职", "收入", "其他"];
 const accounts = ["微信", "支付宝", "银行卡", "现金", "未指定"];
@@ -136,8 +140,9 @@ function App() {
   const [adviceError, setAdviceError] = useState("");
   const [tone, setTone] = useState<AdviceTone>("sharp");
   const [quickText, setQuickText] = useState("今天中午和室友吃疯狂星期四花了 50 块，微信付的");
-  const [draft, setDraft] = useState<TransactionDraft>(emptyDraft);
+  const [draft, setDraft] = useState<TransactionDraft>(() => createEmptyDraft());
   const [parsed, setParsed] = useState<ParseResult | null>(null);
+  const [parsedSourceText, setParsedSourceText] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [budgetYuan, setBudgetYuan] = useState("1800");
   const [settingsStatus, setSettingsStatus] = useState<SettingsStatus | null>(null);
@@ -153,6 +158,7 @@ function App() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
   const adviceRequestId = useRef(0);
+  const monthlyRequestId = useRef(0);
   const weeklyRequestId = useRef(0);
   const adviceScope = useRef("");
 
@@ -205,6 +211,8 @@ function App() {
   ].join("\n");
 
   async function refresh(resetData = false) {
+    const requestId = ++monthlyRequestId.current;
+    const requestMonth = month;
     setError("");
     if (resetData) {
       setStats(null);
@@ -212,22 +220,25 @@ function App() {
     }
     setDataStatus(resetData || !stats ? "loading" : "ready");
     const wakeTimer = window.setTimeout(() => {
-      setDataStatus((current) => current === "loading" ? "waking" : current);
+      if (requestId === monthlyRequestId.current) {
+        setDataStatus((current) => current === "loading" ? "waking" : current);
+      }
     }, 1200);
     try {
       const [nextStats, nextTransactions] = await Promise.all([
-        api.monthlyStats(month),
-        api.listTransactions(month),
+        api.monthlyStats(requestMonth),
+        api.listTransactions(requestMonth),
       ]);
+      if (requestId !== monthlyRequestId.current) return;
       setStats(nextStats);
       setTransactions(nextTransactions);
-      if (nextStats.budget_limit_cents) {
-        setBudgetYuan(String(nextStats.budget_limit_cents / 100));
-      }
+      setBudgetYuan(String(nextStats.budget_limit_cents / 100));
       setDataStatus("ready");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败");
-      setDataStatus("error");
+      if (requestId === monthlyRequestId.current) {
+        setError(err instanceof Error ? err.message : "加载失败");
+        setDataStatus("error");
+      }
     } finally {
       window.clearTimeout(wakeTimer);
     }
@@ -303,7 +314,8 @@ function App() {
     setAdviceSnapshot((current) => current.advice ? { ...current, status: "stale" } : emptyAdviceSnapshot);
   }
 
-  async function loadSettings() {
+  async function loadSettings(showError = false) {
+    if (showError) setError("");
     try {
       const nextSettings = await api.settingsStatus();
       setSettingsStatus(nextSettings);
@@ -314,8 +326,9 @@ function App() {
         backup_model: nextSettings.backup_model || "",
         ai_request_timeout_seconds: String(nextSettings.ai_request_timeout_seconds || 45),
       });
-    } catch {
+    } catch (err) {
       setSettingsStatus(null);
+      if (showError) setError(err instanceof Error ? err.message : "设置读取失败");
     }
   }
 
@@ -336,11 +349,21 @@ function App() {
   }, []);
 
   async function parseQuickEntry() {
+    if (!quickText.trim()) {
+      setError("请先输入一笔收入或支出描述");
+      return;
+    }
+    if (editingId) {
+      setError("请先取消当前编辑，再解析新账单");
+      return;
+    }
+    const sourceText = quickText;
     setLoading(true);
     setError("");
     try {
       const result = await api.parseTransaction(quickText);
       setParsed(result);
+      setParsedSourceText(sourceText);
       setDraft({
         amount_cents: result.amount_cents,
         type: result.type,
@@ -359,6 +382,10 @@ function App() {
   }
 
   async function saveDraft(nextDraft: TransactionDraft) {
+    if (!editingId && parsed && parsedSourceText !== quickText) {
+      setError("描述已修改，请重新解析后再确认入账");
+      return;
+    }
     setLoading(true);
     setError("");
     const wasEditing = Boolean(editingId);
@@ -370,7 +397,9 @@ function App() {
       }
       setEditingId(null);
       setParsed(null);
-      setDraft({ ...emptyDraft, occurred_at: new Date().toISOString() });
+      setParsedSourceText(null);
+      setQuickText("");
+      setDraft(createEmptyDraft());
       await refresh();
       if (ledgerPeriod === "week") await refreshWeekly();
       markAdviceStale();
@@ -422,7 +451,23 @@ function App() {
       raw_text: item.raw_text || "",
       tags: item.tags || [],
     });
+    setQuickText(item.raw_text || item.note || "");
     setParsed(null);
+    setParsedSourceText(null);
+    setActiveView("quick");
+  }
+
+  function cancelEditing() {
+    setEditingId(null);
+    setParsed(null);
+    setParsedSourceText(null);
+    setQuickText("");
+    setDraft(createEmptyDraft());
+    setError("");
+  }
+
+  function openNewTransaction() {
+    cancelEditing();
     setActiveView("quick");
   }
 
@@ -451,7 +496,6 @@ function App() {
       setBackupSecretDraft("");
       setSettingsSaved(true);
       window.setTimeout(() => setSettingsSaved(false), 1800);
-      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存 API 设置失败");
     }
@@ -468,6 +512,19 @@ function App() {
     } finally {
       setProviderTesting(false);
     }
+  }
+
+  function refreshCurrentView() {
+    if (activeView === "settings") {
+      loadSettings(true);
+      return;
+    }
+    if (activeView === "transactions" && ledgerPeriod === "week") {
+      refreshWeekly();
+      return;
+    }
+    refresh();
+    if (activeView === "overview" || activeView === "budget") loadCachedAdvice(true);
   }
 
   const page = pageCopy[activeView];
@@ -538,24 +595,22 @@ function App() {
               <h1>{page.title}</h1>
               <p>{page.description}</p>
             </div>
-            <div className="top-actions">
-              {activeView === "transactions" && ledgerPeriod === "week" ? (
-                <input aria-label="选择统计周" type="week" value={week} onChange={(event) => setWeek(event.target.value)} />
-              ) : (
-                <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
-              )}
-              <button
-                className="icon-button"
-                onClick={() => {
-                  if (activeView === "transactions" && ledgerPeriod === "week") refreshWeekly();
-                  else refresh();
-                  if (activeView === "overview" || activeView === "budget") loadCachedAdvice(true);
-                }}
-                aria-label="刷新"
-              >
-                <ArrowClockwise size={18} />
-              </button>
-            </div>
+            {activeView !== "quick" && (
+              <div className="top-actions">
+                {activeView !== "settings" && (activeView === "transactions" && ledgerPeriod === "week" ? (
+                  <input aria-label="选择统计周" type="week" value={week} onChange={(event) => setWeek(event.target.value)} />
+                ) : (
+                  <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+                ))}
+                <button
+                  className="icon-button"
+                  onClick={refreshCurrentView}
+                  aria-label={activeView === "settings" ? "刷新 AI 设置" : "刷新当前数据"}
+                >
+                  <ArrowClockwise size={18} />
+                </button>
+              </div>
+            )}
           </header>
 
           {error && <div className="error-strip" role="alert">{error}</div>}
@@ -580,7 +635,7 @@ function App() {
                 averageDailyExpense={averageDailyExpense}
                 activeDays={activeDays}
                 settingsStatus={settingsStatus}
-                onOpenQuick={() => setActiveView("quick")}
+                onOpenQuick={openNewTransaction}
                 onOpenAnalytics={() => setActiveView("analytics")}
               />
               )}
@@ -594,8 +649,10 @@ function App() {
                 setDraft={setDraft}
                 loading={loading}
                 editingId={editingId}
+                parsedSourceText={parsedSourceText}
                 parseQuickEntry={parseQuickEntry}
                 saveDraft={saveDraft}
+                cancelEditing={cancelEditing}
               />
               )}
 
@@ -610,7 +667,7 @@ function App() {
                 loading={weeklyLoading && ledgerPeriod === "week"}
                 editTransaction={editTransaction}
                 requestDelete={setPendingDelete}
-                onOpenQuick={() => setActiveView("quick")}
+                onOpenQuick={openNewTransaction}
               />
               )}
 
@@ -878,8 +935,10 @@ function QuickEntryPage({
   setDraft,
   loading,
   editingId,
+  parsedSourceText,
   parseQuickEntry,
   saveDraft,
+  cancelEditing,
 }: {
   quickText: string;
   setQuickText: (value: string) => void;
@@ -888,10 +947,15 @@ function QuickEntryPage({
   setDraft: (draft: TransactionDraft) => void;
   loading: boolean;
   editingId: number | null;
+  parsedSourceText: string | null;
   parseQuickEntry: () => void;
   saveDraft: (draft: TransactionDraft) => void;
+  cancelEditing: () => void;
 }) {
-  const missingFields = parsed?.missing_fields.map(fieldDisplayName).join("、") || "";
+  const parsedIsStale = Boolean(parsed && parsedSourceText !== quickText);
+  const reportedMissingFields = parsed?.missing_fields.map(fieldDisplayName).join("、") || "";
+  const blockingFields = requiredDraftFields(draft).map(fieldDisplayName).join("、");
+  const statusLabel = editingId ? "编辑中" : parsedIsStale ? "待重新解析" : parsed ? "待确认" : "等待输入";
   return (
     <div className="quick-layout">
       <section className="panel quick-command">
@@ -900,25 +964,35 @@ function QuickEntryPage({
             <span className="kicker">账单描述</span>
             <h2>AI 解析语义，<span className="no-break">手动确认入账</span></h2>
           </div>
-          <span className="status-pill">{parsed ? "待确认" : "等待输入"}</span>
+          <span className="status-pill">{statusLabel}</span>
         </div>
         <textarea
           value={quickText}
           onChange={(event) => setQuickText(event.target.value)}
           placeholder="例如：今天中午和室友吃疯狂星期四花了 50 块，微信付的"
+          readOnly={Boolean(editingId)}
+          aria-label={editingId ? "原始账单描述" : "自然语言账单描述"}
         />
         <div className="button-row">
-          <button className="primary-button" onClick={parseQuickEntry} disabled={loading}>
+          <button className="primary-button" onClick={parseQuickEntry} disabled={loading || Boolean(editingId) || !quickText.trim()}>
             <Brain size={18} />
-            {loading ? "正在解析" : "解析账单"}
+            {editingId ? "正在编辑流水" : loading ? "正在解析" : parsedIsStale ? "重新解析" : "解析账单"}
           </button>
         </div>
         {parsed && (
-          <div className="parse-card">
+          <div className={`parse-card ${parsedIsStale ? "stale" : ""}`} role={parsedIsStale ? "alert" : undefined}>
             <CheckCircle size={20} weight="fill" />
             <div>
-              <strong>{parseSourceLabel(parsed)}已完成解析</strong>
-              <span>{missingFields ? `请补充：${missingFields}` : "请核对右侧账单信息"}</span>
+              <strong>{parsedIsStale ? "描述已修改，请重新解析" : `${parseSourceLabel(parsed)}已完成解析`}</strong>
+              <span>
+                {parsedIsStale
+                  ? "右侧保留上一次草稿，仅供对照，暂时不能入账。"
+                  : blockingFields
+                    ? `请补充：${blockingFields}`
+                    : reportedMissingFields
+                      ? `AI 未确定：${reportedMissingFields}，请核对右侧字段`
+                      : "请核对右侧账单信息"}
+              </span>
             </div>
           </div>
         )}
@@ -929,8 +1003,22 @@ function QuickEntryPage({
             <span className="kicker">账单信息</span>
             <h2>{editingId ? "编辑流水" : "确认入账"}</h2>
           </div>
+          {editingId && (
+            <div className="editing-badge">
+              <PencilSimple size={16} />
+              正在编辑：{draft.note || draft.category}
+            </div>
+          )}
         </div>
-        <TransactionForm draft={draft} setDraft={setDraft} onSave={saveDraft} editingId={editingId} />
+        <TransactionForm
+          draft={draft}
+          setDraft={setDraft}
+          onSave={saveDraft}
+          editingId={editingId}
+          busy={loading}
+          saveBlocked={parsedIsStale || Boolean(parsed && parsed.missing_fields.some((field) => isDraftFieldUnresolved(field, draft)))}
+          onCancelEditing={cancelEditing}
+        />
       </section>
     </div>
   );
@@ -1018,7 +1106,7 @@ function TransactionsPage({
                 <div className="transaction-row" key={item.id}>
                   <div>
                     <strong>{item.note || item.category}</strong>
-                    <span>{item.category} / {item.account} / {new Date(item.occurred_at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span>
+                    <span>{item.category} / {item.account} / {businessTimeLabel(item.occurred_at)}</span>
                     {item.tags?.length > 0 && (
                       <div className="row-tags">
                         {item.tags.map((tag) => <em key={`${item.id}-${tag}`}>#{tag}</em>)}
@@ -1494,20 +1582,41 @@ function fieldDisplayName(field: string): string {
   return labels[field] || field;
 }
 
+function isDraftFieldUnresolved(field: string, draft: TransactionDraft): boolean {
+  if (field === "amount_cents") return draft.amount_cents <= 0;
+  if (field === "category") return !draft.category || draft.category === "其他";
+  if (field === "account") return !draft.account || draft.account === "未指定";
+  if (field === "occurred_at") return !draft.occurred_at;
+  if (field === "type") return !draft.type;
+  return false;
+}
+
+function requiredDraftFields(draft: TransactionDraft): string[] {
+  return ["amount_cents", "category", "account", "occurred_at"].filter((field) => isDraftFieldUnresolved(field, draft));
+}
+
 function TransactionForm({
   draft,
   setDraft,
   onSave,
   editingId,
+  busy,
+  saveBlocked,
+  onCancelEditing,
 }: {
   draft: TransactionDraft;
   setDraft: (draft: TransactionDraft) => void;
   onSave: (draft: TransactionDraft) => void;
   editingId: number | null;
+  busy: boolean;
+  saveBlocked: boolean;
+  onCancelEditing: () => void;
 }) {
   const [tagText, setTagText] = useState("");
   const [amountText, setAmountText] = useState(draft.amount_cents ? String(draft.amount_cents / 100) : "");
   const [amountError, setAmountError] = useState("");
+  const [occurredAtText, setOccurredAtText] = useState(() => apiIsoToDateTimeLocal(draft.occurred_at));
+  const [occurredAtError, setOccurredAtError] = useState("");
   const amountChangedLocally = useRef(false);
   const update = <K extends keyof TransactionDraft>(key: K, value: TransactionDraft[K]) => {
     setDraft({ ...draft, [key]: value });
@@ -1521,6 +1630,16 @@ function TransactionForm({
     setAmountText(draft.amount_cents ? String(draft.amount_cents / 100) : "");
     setAmountError("");
   }, [draft.amount_cents, draft.raw_text, editingId]);
+
+  useEffect(() => {
+    try {
+      setOccurredAtText(apiIsoToDateTimeLocal(draft.occurred_at));
+      setOccurredAtError("");
+    } catch (error) {
+      setOccurredAtText("");
+      setOccurredAtError(error instanceof Error ? error.message : "交易时间格式不正确");
+    }
+  }, [draft.occurred_at, draft.raw_text, editingId]);
 
   const updateAmount = (value: string) => {
     setAmountText(value);
@@ -1536,18 +1655,42 @@ function TransactionForm({
       setAmountError("请补全小数位");
       return;
     }
-    setAmountError("");
-    amountChangedLocally.current = true;
-    update("amount_cents", yuanTextToCents(value));
+    try {
+      const amountCents = yuanTextToCents(value);
+      setAmountError("");
+      amountChangedLocally.current = true;
+      update("amount_cents", amountCents);
+    } catch (error) {
+      setAmountError(error instanceof Error ? error.message : "请输入正确金额");
+    }
+  };
+
+  const updateOccurredAt = (value: string) => {
+    setOccurredAtText(value);
+    try {
+      const apiValue = dateTimeLocalToApiIso(value);
+      setOccurredAtError("");
+      update("occurred_at", apiValue);
+    } catch (error) {
+      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的交易时间");
+    }
   };
 
   const submit = () => {
+    let amountCents: number;
     try {
-      const amountCents = yuanTextToCents(amountText);
+      amountCents = yuanTextToCents(amountText);
       setAmountError("");
-      onSave({ ...draft, amount_cents: amountCents });
     } catch (error) {
       setAmountError(error instanceof Error ? error.message : "请输入正确金额");
+      return;
+    }
+    try {
+      const occurredAt = dateTimeLocalToApiIso(occurredAtText);
+      setOccurredAtError("");
+      onSave({ ...draft, amount_cents: amountCents, occurred_at: occurredAt });
+    } catch (error) {
+      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的交易时间");
     }
   };
   const addTag = () => {
@@ -1594,6 +1737,18 @@ function TransactionForm({
         </select>
       </label>
       <label className="field-block wide">
+        <span>交易时间</span>
+        <input
+          type="datetime-local"
+          step="60"
+          value={occurredAtText}
+          onChange={(event) => updateOccurredAt(event.target.value)}
+          aria-invalid={Boolean(occurredAtError)}
+          aria-describedby={occurredAtError ? "occurred-at-error" : undefined}
+        />
+        {occurredAtError && <small className="field-error" id="occurred-at-error">{occurredAtError}</small>}
+      </label>
+      <label className="field-block wide">
         <span>备注</span>
         <input value={draft.note} onChange={(event) => update("note", event.target.value)} placeholder="例如 疯狂星期四" />
       </label>
@@ -1622,13 +1777,21 @@ function TransactionForm({
           </div>
         )}
       </label>
-      <button
-        className="primary-button save-button"
-        onClick={submit}
-        disabled={Boolean(amountError) || !amountText || !draft.category || !draft.account || draft.account === "未指定"}
-      >
-        {editingId ? "保存修改" : "确认入账"}
-      </button>
+      <div className="form-actions wide">
+        {editingId && (
+          <button className="ghost-button" onClick={onCancelEditing} disabled={busy}>
+            <X size={17} />
+            取消编辑
+          </button>
+        )}
+        <button
+          className="primary-button save-button"
+          onClick={submit}
+          disabled={busy || saveBlocked || Boolean(amountError) || Boolean(occurredAtError) || !amountText || requiredDraftFields(draft).length > 0}
+        >
+          {busy ? "正在保存" : editingId ? "保存修改" : "确认入账"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -1678,7 +1841,7 @@ interface TransactionDateGroup {
 function groupTransactionsByDate(items: Transaction[]): TransactionDateGroup[] {
   const groups = new Map<string, TransactionDateGroup>();
   for (const item of items) {
-    const date = item.occurred_at.slice(0, 10);
+    const date = businessDateKey(item.occurred_at);
     const group = groups.get(date) || { date, items: [], expense_cents: 0, income_cents: 0 };
     group.items.push(item);
     if (item.type === "income") {

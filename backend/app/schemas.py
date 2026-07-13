@@ -2,16 +2,20 @@ from datetime import date, datetime
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
+from .business_time import to_business_datetime
+from .money import MAX_TRANSACTION_AMOUNT_CENTS
+
 
 TransactionType = Literal["expense", "income"]
 AdviceTone = Literal["sharp", "warm"]
 AdviceSnapshotStatus = Literal["fresh", "stale", "missing"]
 ProviderSlot = Literal["primary", "backup", "local", "fallback"]
 AiProviderTestSlot = Literal["all", "primary", "backup"]
+MONTH_PATTERN = r"^\d{4}-(?:0[1-9]|1[0-2])$"
 
 
 class TransactionBase(BaseModel):
-    amount_cents: int = Field(ge=0)
+    amount_cents: int = Field(ge=0, le=MAX_TRANSACTION_AMOUNT_CENTS)
     type: TransactionType = "expense"
     category: str = Field(min_length=1, max_length=24)
     account: str = Field(min_length=1, max_length=24)
@@ -19,6 +23,11 @@ class TransactionBase(BaseModel):
     note: str = Field(default="", max_length=120)
     raw_text: str | None = Field(default=None, max_length=240)
     tags: list[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("occurred_at")
+    @classmethod
+    def normalize_occurred_at(cls, value: datetime) -> datetime:
+        return to_business_datetime(value)
 
     @field_validator("category", "account", "note", mode="before")
     @classmethod
@@ -45,16 +54,22 @@ class TransactionBase(BaseModel):
 
 
 class TransactionCreate(TransactionBase):
-    pass
+    amount_cents: int = Field(gt=0, le=MAX_TRANSACTION_AMOUNT_CENTS)
 
 
 class TransactionUpdate(TransactionBase):
-    pass
+    amount_cents: int = Field(gt=0, le=MAX_TRANSACTION_AMOUNT_CENTS)
 
 
 class Transaction(TransactionBase):
+    amount_cents: int = Field(gt=0, le=MAX_TRANSACTION_AMOUNT_CENTS)
     id: int
     created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime) -> datetime:
+        return to_business_datetime(value)
 
 
 class ParseRequest(BaseModel):
@@ -65,13 +80,13 @@ class ParseResult(TransactionBase):
     confidence: float = Field(ge=0, le=1)
     source: Literal["model", "local_rule", "error_fallback"]
     provider: ProviderSlot = "local"
-    missing_fields: list[str] = []
+    missing_fields: list[str] = Field(default_factory=list)
     needs_review: bool = True
 
 
 class BudgetCreate(BaseModel):
-    month: str = Field(pattern=r"^\d{4}-\d{2}$")
-    limit_cents: int = Field(ge=0)
+    month: str = Field(pattern=MONTH_PATTERN)
+    limit_cents: int = Field(ge=0, le=MAX_TRANSACTION_AMOUNT_CENTS)
     category: str | None = Field(default=None, max_length=24)
 
 

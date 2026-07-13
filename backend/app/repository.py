@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import json
-from datetime import datetime
+from .business_time import business_date_key, business_now, to_business_datetime
 from .schemas import TransactionCreate, TransactionUpdate, BudgetCreate
 
 
@@ -29,16 +29,16 @@ def row_to_transaction(row: sqlite3.Row) -> dict:
         "type": row["type"],
         "category": row["category"],
         "account": row["account"],
-        "occurred_at": row["occurred_at"],
+        "occurred_at": to_business_datetime(row["occurred_at"]).isoformat(),
         "note": row["note"],
         "raw_text": row["raw_text"],
         "tags": decode_tags(row["tags"]),
-        "created_at": row["created_at"],
+        "created_at": to_business_datetime(row["created_at"]).isoformat(),
     }
 
 
 def create_transaction(conn: sqlite3.Connection, payload: TransactionCreate) -> dict:
-    now = datetime.now().isoformat()
+    now = business_now().isoformat()
     cursor = conn.execute(
         """
         INSERT INTO transactions
@@ -109,15 +109,6 @@ def list_transactions(
 ) -> list[dict]:
     clauses = []
     params: list[str] = []
-    if month:
-        clauses.append("substr(occurred_at, 1, 7) = ?")
-        params.append(month)
-    if start_date:
-        clauses.append("substr(occurred_at, 1, 10) >= ?")
-        params.append(start_date)
-    if end_date:
-        clauses.append("substr(occurred_at, 1, 10) <= ?")
-        params.append(end_date)
     if tx_type:
         clauses.append("type = ?")
         params.append(tx_type)
@@ -128,12 +119,23 @@ def list_transactions(
         clauses.append("account = ?")
         params.append(account)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    rows = conn.execute(f"SELECT * FROM transactions {where} ORDER BY occurred_at DESC", params).fetchall()
-    return [row_to_transaction(row) for row in rows]
+    rows = conn.execute(f"SELECT * FROM transactions {where}", params).fetchall()
+    transactions = [row_to_transaction(row) for row in rows]
+    if month:
+        transactions = [item for item in transactions if business_date_key(item["occurred_at"])[:7] == month]
+    if start_date:
+        transactions = [item for item in transactions if business_date_key(item["occurred_at"]) >= start_date]
+    if end_date:
+        transactions = [item for item in transactions if business_date_key(item["occurred_at"]) <= end_date]
+    return sorted(
+        transactions,
+        key=lambda item: to_business_datetime(item["occurred_at"]),
+        reverse=True,
+    )
 
 
 def upsert_budget(conn: sqlite3.Connection, payload: BudgetCreate) -> dict:
-    now = datetime.now().isoformat()
+    now = business_now().isoformat()
     if payload.category is None:
         cursor = conn.execute(
             "UPDATE budgets SET limit_cents = ? WHERE month = ? AND category IS NULL",

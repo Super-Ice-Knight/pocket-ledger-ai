@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     backup_openai_model: str = Field(default="", alias="BACKUP_OPENAI_COMPATIBLE_MODEL")
     ai_request_timeout_seconds: int = Field(default=45, alias="AI_REQUEST_TIMEOUT_SECONDS")
     runtime_ai_settings_writable: bool = Field(default=True, alias="RUNTIME_AI_SETTINGS_WRITABLE")
+    seed_demo_data: bool = Field(default=False, alias="SEED_DEMO_DATA")
     cors_allowed_origins: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173",
         alias="CORS_ALLOWED_ORIGINS",

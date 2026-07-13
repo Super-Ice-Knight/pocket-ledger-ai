@@ -1,15 +1,16 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import httpx
 from fastapi.testclient import TestClient
 
-from app.database import init_db, connect
+from app.database import init_db, connect, seed_demo_data
 from app.config import get_settings
 from app.main import app
 from app.money import parse_yuan_to_cents
 from app.repository import create_transaction
 from app.schemas import TransactionCreate
-from app.ai import build_chat_completion_payload, decode_json_object, local_parse
+from app.ai import build_chat_completion_payload, decode_json_object, detect_occurred_at, local_parse
+from app.money import MAX_TRANSACTION_AMOUNT_CENTS
 from app.runtime_settings import AiProvider
 
 
@@ -388,6 +389,50 @@ def test_ai_parse_falls_back_locally_when_all_providers_fail(tmp_path: Path, mon
     assert body["amount_cents"] == 1260
 
 
+def test_ai_failure_logs_are_structured_without_secrets_or_raw_text(tmp_path: Path, monkeypatch, caplog):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "safe_logs.db"))
+    get_settings.cache_clear()
+    init_db()
+
+    class FailingClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            raise httpx.TimeoutException("provider timed out")
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FailingClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "private-api-key",
+            "backup_base_url": "",
+            "backup_model": "",
+            "backup_api_key": "",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    with caplog.at_level("INFO", logger="pocket_ledger.ai"):
+        response = client.post("/api/ai/parse-transaction", json={"text": "私人账单原文花了18元"})
+
+    assert response.status_code == 200
+    assert "operation=parse" in caplog.text
+    assert "slot=primary" in caplog.text
+    assert "TimeoutException" in caplog.text
+    assert "private-api-key" not in caplog.text
+    assert "私人账单原文" not in caplog.text
+
+
 def test_ai_provider_test_reports_status_without_exposing_keys(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "provider_test.db"))
     get_settings.cache_clear()
@@ -571,3 +616,166 @@ def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
     assert stale_after_change.json()["status"] == "stale"
     assert stale_after_change.json()["advice"] == body
     assert calls == ["primary-model"]
+
+
+def test_transaction_amount_bounds_are_enforced_on_create_and_update(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "amount_bounds.db"))
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+    payload = {
+        "amount_cents": 1,
+        "type": "expense",
+        "category": "餐饮",
+        "account": "微信",
+        "occurred_at": "2026-07-12T12:00:00+08:00",
+        "note": "最小金额",
+        "raw_text": "测试",
+        "tags": [],
+    }
+
+    for invalid_amount in (0, -1, MAX_TRANSACTION_AMOUNT_CENTS + 1):
+        response = client.post("/api/transactions", json={**payload, "amount_cents": invalid_amount})
+        assert response.status_code == 422
+
+    created = client.post("/api/transactions", json=payload)
+    assert created.status_code == 200
+    assert created.json()["amount_cents"] == 1
+
+    updated = client.put(
+        f"/api/transactions/{created.json()['id']}",
+        json={**payload, "amount_cents": 0},
+    )
+    assert updated.status_code == 422
+
+
+def test_business_timezone_and_time_edits_update_month_and_week_stats(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "business_time.db"))
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+    payload = {
+        "amount_cents": 1260,
+        "type": "expense",
+        "category": "交通",
+        "account": "支付宝",
+        "occurred_at": "2026-06-30T16:30:00Z",
+        "note": "跨日测试",
+        "raw_text": "测试",
+        "tags": [],
+    }
+
+    created = client.post("/api/transactions", json=payload)
+    assert created.status_code == 200
+    body = created.json()
+    assert body["occurred_at"] == "2026-07-01T00:30:00+08:00"
+    assert client.get("/api/stats/monthly?month=2026-06").json()["expense_cents"] == 0
+    assert client.get("/api/stats/monthly?month=2026-07").json()["expense_cents"] == 1260
+    assert client.get("/api/stats/weekly?date=2026-07-01").json()["expense_cents"] == 1260
+
+    moved_to_next_week = client.put(
+        f"/api/transactions/{body['id']}",
+        json={**payload, "occurred_at": "2026-07-06T09:00:00+08:00"},
+    )
+    assert moved_to_next_week.status_code == 200
+    assert client.get("/api/stats/weekly?date=2026-07-01").json()["expense_cents"] == 0
+    assert client.get("/api/stats/weekly?date=2026-07-06").json()["expense_cents"] == 1260
+
+    moved_to_next_month = client.put(
+        f"/api/transactions/{body['id']}",
+        json={**payload, "occurred_at": "2026-08-01T09:00:00+08:00"},
+    )
+    assert moved_to_next_month.status_code == 200
+    assert client.get("/api/stats/monthly?month=2026-07").json()["expense_cents"] == 0
+    assert client.get("/api/stats/monthly?month=2026-08").json()["expense_cents"] == 1260
+
+
+def test_relative_dates_use_asia_shanghai_after_utc_day_rollover():
+    utc_afternoon = datetime(2026, 7, 13, 16, 30, tzinfo=timezone.utc)
+
+    assert detect_occurred_at("今天咖啡24元", utc_afternoon).date().isoformat() == "2026-07-14"
+    assert detect_occurred_at("昨天咖啡24元", utc_afternoon).date().isoformat() == "2026-07-13"
+    assert detect_occurred_at("前天咖啡24元", utc_afternoon).date().isoformat() == "2026-07-12"
+
+
+def test_demo_data_is_seeded_once_and_does_not_return_after_user_deletes_it(tmp_path: Path):
+    db_path = tmp_path / "demo_once.db"
+    init_db(db_path)
+    seed_demo_data(db_path)
+    with connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 8
+        conn.execute("DELETE FROM transactions")
+        conn.commit()
+
+    seed_demo_data(db_path)
+    with connect(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 0
+
+
+def test_invalid_months_and_oversized_date_ranges_return_422(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "query_validation.db"))
+    get_settings.cache_clear()
+    init_db()
+    client = TestClient(app)
+
+    assert client.get("/api/stats/monthly?month=2026-99").status_code == 422
+    assert client.get("/api/transactions?month=abcd").status_code == 422
+    assert client.get("/api/ai/monthly-advice?month=2026-00").status_code == 422
+    assert client.get("/api/transactions?start_date=2025-01-01&end_date=2026-12-31").status_code == 422
+
+
+def test_model_missing_fields_are_recomputed_after_normalization(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("POCKET_LEDGER_DB_PATH", str(tmp_path / "recomputed_missing.db"))
+    get_settings.cache_clear()
+    init_db()
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {
+                "choices": [{"message": {"content": (
+                    '{"amount_cents":0,"type":"expense","category":"mystery",'
+                    '"account":"unknown-pay","note":"某事","tags":[],"confidence":0.7,"missing_fields":[]}'
+                )}}]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout: int):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def post(self, url: str, headers: dict, json: dict):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.ai.httpx.AsyncClient", FakeClient)
+    client = TestClient(app)
+    client.put(
+        "/api/settings/ai",
+        json={
+            "primary_base_url": "https://primary.example/v1",
+            "primary_model": "primary-model",
+            "primary_api_key": "primary-secret",
+            "backup_base_url": "",
+            "backup_model": "",
+            "backup_api_key": "",
+            "ai_request_timeout_seconds": 30,
+        },
+    )
+
+    response = client.post("/api/ai/parse-transaction", json={"text": "某事"})
+
+    assert response.status_code == 200
+    assert response.json()["source"] == "model"
+    assert set(response.json()["missing_fields"]) == {
+        "amount_cents",
+        "category",
+        "account",
+        "occurred_at",
+    }

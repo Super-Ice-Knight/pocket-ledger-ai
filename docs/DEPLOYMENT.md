@@ -29,14 +29,17 @@ OPENAI_COMPATIBLE_MODEL=qwen/qwen3.6-27b
 OPENAI_COMPATIBLE_API_KEY=<Render Secret>
 AI_REQUEST_TIMEOUT_SECONDS=10
 RUNTIME_AI_SETTINGS_WRITABLE=false
+SEED_DEMO_DATA=true
 CORS_ALLOWED_ORIGINS=https://pocket-ledger-ai.vercel.app
 ```
 
 当前线上未配置 `BACKUP_OPENAI_COMPATIBLE_*`。代码支持备用 Provider，但只有独立验证延迟和结构化输出后才应加入；否则主接口失败后会串行等待慢接口，反而破坏演示体验。
 
-`render.yaml` 不会替已经手工创建的服务自动补齐 Secret。更新代码后仍需在 Render Dashboard 的 Environment 页面确认主模型 Key 和 `RUNTIME_AI_SETTINGS_WRITABLE=false`。
+`render.yaml` 不会替已经手工创建的服务自动补齐 Secret 或新增变量。更新代码后仍需在 Render Dashboard 的 Environment 页面确认主模型 Key、`RUNTIME_AI_SETTINGS_WRITABLE=false`，并按用途决定 `SEED_DEMO_DATA=true|false`。
 
 公开部署关闭设置写入，原因是项目没有登录系统。CORS 只能限制浏览器来源，不能代替身份认证。
+
+公开演示可设置 `SEED_DEMO_DATA=true`，个人账本应保持 `false`。开启后仅在空数据库第一次初始化时写入演示流水，并记录 `demo_seed_completed=true`；用户随后删除全部流水，重启服务也不会再次补回。
 
 ## SQLite 持久化
 
@@ -59,6 +62,8 @@ POCKET_LEDGER_DB_PATH=/var/data/pocket_ledger.db
 README 和演示中必须把免费线上版本描述为“演示级持久化”，不能承诺永久保存。
 
 `ai_advice_cache` 与账单、预算使用同一个 SQLite 文件，后端启动时通过 `init_db()` 自动创建，不需要在 Render 手动执行迁移。免费实例重建时，账单和已生成点评都可能一起重置。
+
+后端业务时区固定为 `Asia/Shanghai`。`requirements.txt` 包含 Windows 所需的 `tzdata`，Render 与本地都会把交易时间保存为带 `+08:00` 的 ISO 8601；月度、周度和日期范围查询按北京时间日期处理。
 
 ## Vercel 前端
 

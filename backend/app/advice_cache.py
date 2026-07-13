@@ -3,8 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from datetime import datetime, timezone
 
+from .business_time import business_now
 from .runtime_settings import RuntimeAiSettings
 from .schemas import AdviceTone
 
@@ -63,7 +63,7 @@ def write_advice_snapshot(
     context_hash: str,
     advice: dict,
 ) -> str:
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = business_now().isoformat()
     conn.execute(
         """
         INSERT INTO ai_advice_cache (month, tone, context_hash, payload, generated_at)

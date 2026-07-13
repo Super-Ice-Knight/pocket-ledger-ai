@@ -911,6 +911,31 @@ textarea {
   line-height: 1.5;
 }
 
+.parse-card.stale {
+  border-color: rgb(168 132 79 / 0.34);
+  background: rgb(247 239 221 / 0.78);
+  color: #755c31;
+}
+
+.editing-badge {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgb(115 90 115 / 0.25);
+  border-radius: 999px;
+  background: rgb(240 233 241 / 0.72);
+  color: var(--plum);
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+textarea[readonly] {
+  background: rgb(242 244 244 / 0.76);
+  color: var(--muted);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -938,6 +963,20 @@ textarea {
 .wide,
 .save-button {
   grid-column: 1 / -1;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.form-actions .save-button {
+  flex: 1 1 240px;
+}
+
+.form-actions .ghost-button {
+  flex: 0 1 160px;
 }
 
 .tag-editor {
@@ -1177,7 +1216,7 @@ textarea {
 
 .mini-pie-content {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: minmax(132px, 150px) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
 }
@@ -1198,6 +1237,12 @@ textarea {
   gap: 8px;
   color: var(--ink-soft);
   font-size: 12px;
+}
+
+.pie-legend span,
+.pie-legend b,
+.pie-legend small {
+  white-space: nowrap;
 }
 
 .pie-legend i {
@@ -1763,6 +1808,16 @@ textarea {
   .icon-button,
   .primary-button,
   .ghost-button {
+    width: 100%;
+  }
+
+  .form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .form-actions .save-button,
+  .form-actions .ghost-button {
+    flex-basis: auto;
     width: 100%;
   }
 

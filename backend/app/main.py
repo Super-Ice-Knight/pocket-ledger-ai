@@ -34,6 +34,7 @@ from .schemas import (
     AiSettingsUpdate,
     AiProviderTestRequest,
     AiProviderTestResult,
+    MONTH_PATTERN,
 )
 from .stats import monthly_stats, weekly_stats, current_month
 from .config import get_settings
@@ -42,7 +43,8 @@ from .config import get_settings
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    seed_demo_data()
+    if get_settings().seed_demo_data:
+        seed_demo_data()
     yield
 
 
@@ -102,7 +104,7 @@ def create_transaction_endpoint(payload: TransactionCreate) -> dict:
 
 @app.get("/api/transactions", response_model=list[Transaction])
 def list_transactions_endpoint(
-    month: str | None = None,
+    month: str | None = Query(default=None, pattern=MONTH_PATTERN),
     start_date: date | None = None,
     end_date: date | None = None,
     type: str | None = Query(default=None),
@@ -111,6 +113,8 @@ def list_transactions_endpoint(
 ) -> list[dict]:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    if start_date and end_date and (end_date - start_date).days > 366:
+        raise HTTPException(status_code=422, detail="单次查询范围不能超过 366 天")
     with get_connection() as conn:
         return list_transactions(
             conn,
@@ -143,7 +147,7 @@ def delete_transaction_endpoint(transaction_id: int) -> dict:
 
 
 @app.get("/api/stats/monthly", response_model=MonthlyStats)
-def monthly_stats_endpoint(month: str | None = None) -> dict:
+def monthly_stats_endpoint(month: str | None = Query(default=None, pattern=MONTH_PATTERN)) -> dict:
     with get_connection() as conn:
         return monthly_stats(conn, month or current_month())
 
@@ -170,7 +174,10 @@ def set_budget_endpoint(payload: BudgetCreate) -> dict:
 
 
 @app.get("/api/ai/monthly-advice", response_model=AdviceSnapshot)
-def monthly_advice_snapshot_endpoint(month: str | None = None, tone: AdviceTone = "sharp") -> dict:
+def monthly_advice_snapshot_endpoint(
+    month: str | None = Query(default=None, pattern=MONTH_PATTERN),
+    tone: AdviceTone = "sharp",
+) -> dict:
     target_month = month or current_month()
     with get_connection() as conn:
         stats = monthly_stats(conn, target_month)
@@ -180,7 +187,10 @@ def monthly_advice_snapshot_endpoint(month: str | None = None, tone: AdviceTone 
 
 
 @app.post("/api/ai/monthly-advice", response_model=AdviceSnapshot)
-async def generate_monthly_advice_endpoint(month: str | None = None, tone: AdviceTone = "sharp") -> dict:
+async def generate_monthly_advice_endpoint(
+    month: str | None = Query(default=None, pattern=MONTH_PATTERN),
+    tone: AdviceTone = "sharp",
+) -> dict:
     target_month = month or current_month()
     with get_connection() as conn:
         stats = monthly_stats(conn, target_month)

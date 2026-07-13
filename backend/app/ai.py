@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
+import logging
 import re
 from time import perf_counter
 from urllib.parse import urlparse
+from uuid import uuid4
 import httpx
+
+from .business_time import business_now, to_business_datetime
 from .runtime_settings import AiProvider, get_runtime_ai_settings
 from .money import extract_transaction_amount_cents, MoneyParseError
 from .schemas import ParseResult, AdviceTone, AiProviderTestResult, AiProviderTestSlot
@@ -64,6 +68,7 @@ ACCOUNT_ALIASES = {
 
 CANONICAL_CATEGORIES = set(CATEGORY_KEYWORDS) | {"兼职", "其他"}
 CANONICAL_ACCOUNTS = set(ACCOUNT_KEYWORDS) | {"未指定"}
+logger = logging.getLogger("pocket_ledger.ai")
 
 
 def local_parse(text: str) -> ParseResult:
@@ -145,13 +150,59 @@ def has_relative_date(text: str) -> bool:
     return any(word in text for word in ["今天", "今日", "昨天", "昨日", "前天"])
 
 
-def detect_occurred_at(text: str) -> datetime:
-    now = datetime.now().replace(microsecond=0)
+def detect_occurred_at(text: str, now: datetime | None = None) -> datetime:
+    current = to_business_datetime(now) if now else business_now()
     if "前天" in text:
-        return now - timedelta(days=2)
+        return current - timedelta(days=2)
     if "昨天" in text or "昨日" in text:
-        return now - timedelta(days=1)
-    return now
+        return current - timedelta(days=1)
+    return current
+
+
+def model_missing_fields(
+    parsed: dict,
+    amount_cents: int,
+    category: str,
+    account: str,
+    occurred_at_missing: bool,
+) -> list[str]:
+    reported = parsed.get("missing_fields")
+    missing = [str(field) for field in reported] if isinstance(reported, list) else []
+    if amount_cents <= 0:
+        missing.append("amount_cents")
+    if category == "其他":
+        missing.append("category")
+    if account == "未指定":
+        missing.append("account")
+    if occurred_at_missing:
+        missing.append("occurred_at")
+    return list(dict.fromkeys(missing))
+
+
+def resolve_model_occurred_at(parsed: dict, local: ParseResult, text: str) -> tuple[datetime, bool]:
+    if has_relative_date(text):
+        return local.occurred_at, False
+    raw_value = parsed.get("occurred_at")
+    if not raw_value:
+        return local.occurred_at, True
+    try:
+        return to_business_datetime(str(raw_value)), False
+    except (TypeError, ValueError):
+        return local.occurred_at, True
+
+
+def log_provider_failure(operation: str, request_id: str, provider: AiProvider, started_at: float, exc: Exception) -> None:
+    status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+    logger.warning(
+        "ai_provider_failed operation=%s request_id=%s slot=%s model=%s latency_ms=%s http_status=%s error_type=%s",
+        operation,
+        request_id,
+        provider.slot,
+        provider.model,
+        round((perf_counter() - started_at) * 1000),
+        status_code,
+        exc.__class__.__name__,
+    )
 
 
 async def parse_with_model(text: str) -> ParseResult:
@@ -159,7 +210,8 @@ async def parse_with_model(text: str) -> ParseResult:
     providers = runtime.configured_providers()
     if not providers:
         return local_parse(text)
-    now = datetime.now().replace(microsecond=0).isoformat()
+    now = business_now().isoformat()
+    request_id = uuid4().hex[:12]
     prompt = (
         "你是记账系统的结构化解析器。只返回 JSON, 不要解释。"
         f"当前本地时间是 {now}。遇到今天、昨天、前天等相对日期, 必须以当前本地时间换算。"
@@ -167,6 +219,7 @@ async def parse_with_model(text: str) -> ParseResult:
         "tags(array), confidence(0-1), missing_fields(array)。金额必须转换为分。tags 用于用户自定义标签, 不确定则返回空数组。"
     )
     for provider in providers:
+        started_at = perf_counter()
         try:
             content = await request_chat_completion(
                 provider=provider,
@@ -180,12 +233,15 @@ async def parse_with_model(text: str) -> ParseResult:
             )
             parsed = decode_json_object(content)
             local = local_parse(text)
-            occurred_at = local.occurred_at if has_relative_date(text) else parsed.get("occurred_at") or local.occurred_at
-            return ParseResult(
-                amount_cents=int(parsed.get("amount_cents") or local.amount_cents),
+            occurred_at, occurred_at_missing = resolve_model_occurred_at(parsed, local, text)
+            amount_cents = int(parsed.get("amount_cents") or local.amount_cents)
+            category = normalize_category(parsed.get("category"), local.category)
+            account = normalize_account(parsed.get("account"), local.account)
+            result = ParseResult(
+                amount_cents=amount_cents,
                 type=parsed.get("type") or local.type,
-                category=normalize_category(parsed.get("category"), local.category),
-                account=normalize_account(parsed.get("account"), local.account),
+                category=category,
+                account=account,
                 occurred_at=occurred_at,
                 note=parsed.get("note") or local.note,
                 raw_text=text,
@@ -193,11 +249,27 @@ async def parse_with_model(text: str) -> ParseResult:
                 confidence=float(parsed.get("confidence") or 0.78),
                 source="model",
                 provider=provider.slot,
-                missing_fields=parsed.get("missing_fields") or [],
+                missing_fields=model_missing_fields(
+                    parsed,
+                    amount_cents,
+                    category,
+                    account,
+                    occurred_at_missing,
+                ),
                 needs_review=True,
             )
-        except Exception:
+            logger.info(
+                "ai_provider_succeeded operation=parse request_id=%s slot=%s model=%s latency_ms=%s",
+                request_id,
+                provider.slot,
+                provider.model,
+                round((perf_counter() - started_at) * 1000),
+            )
+            return result
+        except Exception as exc:
+            log_provider_failure("parse", request_id, provider, started_at, exc)
             continue
+    logger.info("ai_fallback_used operation=parse request_id=%s provider_count=%s", request_id, len(providers))
     fallback = local_parse(text)
     fallback.source = "error_fallback"
     fallback.provider = "fallback"
@@ -340,7 +412,9 @@ async def monthly_advice(stats: dict, tone: AdviceTone) -> dict:
     fallback = local_advice(stats, tone)
     if not providers:
         return {**fallback, "tone": tone, "source": "local_rule", "provider": "local"}
+    request_id = uuid4().hex[:12]
     for provider in providers:
+        started_at = perf_counter()
         try:
             content = await request_chat_completion(
                 provider=provider,
@@ -364,14 +438,24 @@ async def monthly_advice(stats: dict, tone: AdviceTone) -> dict:
                 response_format={"type": "json_object"},
                 temperature=0.45,
             )
-            return {
+            result = {
                 **normalize_advice_payload(decode_json_object(content), fallback),
                 "tone": tone,
                 "source": "model",
                 "provider": provider.slot,
             }
-        except Exception:
+            logger.info(
+                "ai_provider_succeeded operation=advice request_id=%s slot=%s model=%s latency_ms=%s",
+                request_id,
+                provider.slot,
+                provider.model,
+                round((perf_counter() - started_at) * 1000),
+            )
+            return result
+        except Exception as exc:
+            log_provider_failure("advice", request_id, provider, started_at, exc)
             continue
+    logger.info("ai_fallback_used operation=advice request_id=%s provider_count=%s", request_id, len(providers))
     return {**fallback, "tone": tone, "source": "error_fallback", "provider": "fallback"}
 
 
