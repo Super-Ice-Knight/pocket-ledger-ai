@@ -6,8 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
 from .ai import parse_with_model, monthly_advice, test_ai_providers
+from .advice_cache import advice_context_hash, read_advice_snapshot, write_advice_snapshot
 from .database import init_db, seed_demo_data, get_connection
-from .runtime_settings import get_settings_status, save_runtime_ai_settings
+from .runtime_settings import get_runtime_ai_settings, get_settings_status, save_runtime_ai_settings
 from .repository import (
     create_transaction,
     update_transaction,
@@ -25,6 +26,7 @@ from .schemas import (
     BudgetCreate,
     MonthlyStats,
     AdviceResponse,
+    AdviceSnapshot,
     AdviceTone,
     SettingsStatus,
     AiSettingsUpdate,
@@ -147,11 +149,31 @@ def set_budget_endpoint(payload: BudgetCreate) -> dict:
         }
 
 
-@app.get("/api/ai/monthly-advice", response_model=AdviceResponse)
-async def monthly_advice_endpoint(month: str | None = None, tone: AdviceTone = "sharp") -> dict:
+@app.get("/api/ai/monthly-advice", response_model=AdviceSnapshot)
+def monthly_advice_snapshot_endpoint(month: str | None = None, tone: AdviceTone = "sharp") -> dict:
+    target_month = month or current_month()
     with get_connection() as conn:
-        stats = monthly_stats(conn, month or current_month())
-    return await monthly_advice(stats, tone)
+        stats = monthly_stats(conn, target_month)
+        runtime = get_runtime_ai_settings(conn)
+        context_hash = advice_context_hash(stats, tone, runtime)
+        return read_advice_snapshot(conn, target_month, tone, context_hash)
+
+
+@app.post("/api/ai/monthly-advice", response_model=AdviceSnapshot)
+async def generate_monthly_advice_endpoint(month: str | None = None, tone: AdviceTone = "sharp") -> dict:
+    target_month = month or current_month()
+    with get_connection() as conn:
+        stats = monthly_stats(conn, target_month)
+        runtime = get_runtime_ai_settings(conn)
+        context_hash = advice_context_hash(stats, tone, runtime)
+
+    advice = await monthly_advice(stats, tone)
+    if advice["source"] == "error_fallback":
+        return {"status": "fresh", "advice": advice, "generated_at": None}
+
+    with get_connection() as conn:
+        generated_at = write_advice_snapshot(conn, target_month, tone, context_hash, advice)
+    return {"status": "fresh", "advice": advice, "generated_at": generated_at}
 
 
 if __name__ == "__main__":

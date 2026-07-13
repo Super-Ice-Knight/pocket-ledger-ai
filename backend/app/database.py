@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ai_advice_cache (
+    month TEXT NOT NULL,
+    tone TEXT NOT NULL CHECK(tone IN ('sharp', 'warm')),
+    context_hash TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    generated_at TEXT NOT NULL,
+    PRIMARY KEY(month, tone)
+);
 """
 
 

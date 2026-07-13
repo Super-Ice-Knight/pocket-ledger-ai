@@ -81,26 +81,44 @@
 
 ## GET /api/ai/monthly-advice
 
-根据月度统计和预算生成 AI 财务分析，参数：
+只读取 SQLite 中已保存的点评，**不调用外部模型**。参数：
 
 - `month=YYYY-MM`
 - `tone=sharp` 或 `tone=warm`
 
-返回：
+尚未生成时返回：
 
 ```json
 {
-  "tone": "sharp",
-  "advice": "预算进入警戒区",
-  "headline": "预算进入警戒区",
-  "detail": "本月支出 301 元，预算使用 17%，剩余约 1498 元。最高分类是学习，主要账户是支付宝，日均支出约 301 元。别被低价小单偷走预算。",
-  "action_items": ["继续保持记录", "每周复盘分类", "留意小额高频"],
-  "source": "model",
-  "provider": "primary"
+  "status": "missing",
+  "advice": null,
+  "generated_at": null
 }
 ```
 
-`advice` 保留为一句话摘要，便于旧前端兼容；新界面主要使用 `headline`、`detail` 和 `action_items`。模型调用和 AI 快记共用同一套 OpenAI 兼容 Provider 链。所有已配置 Provider 都失败时，后端用预算使用率、最高分类、主要账户、日均支出等本地统计生成结构化兜底分析。
+有缓存时 `status` 为 `fresh` 或 `stale`，`advice` 中包含 `headline`、`detail`、`action_items`、`source` 和 `provider`。`stale` 表示账单、预算、模型配置或 Prompt 版本已变化，旧点评仍可查看，但不再当作当前结论。
+
+## POST /api/ai/monthly-advice
+
+由用户手动触发一次新点评。模型调用和 AI 快记共用 OpenAI 兼容 Provider 链；生成成功后写入 `ai_advice_cache`。
+
+```json
+{
+  "status": "fresh",
+  "advice": {
+    "tone": "sharp",
+    "advice": "预算进入警戒区",
+    "headline": "预算进入警戒区",
+    "detail": "本月支出和预算使用情况的详细分析。",
+    "action_items": ["减少高频小单", "复盘最高分类"],
+    "source": "model",
+    "provider": "primary"
+  },
+  "generated_at": "2026-07-13T03:20:00+00:00"
+}
+```
+
+缓存指纹使用当月统计、语气、Provider 的 Base URL/模型名和 Prompt 版本计算，不包含 API Key。`source=model` 和无 Provider 时的 `source=local_rule` 会持久化；Provider 异常得到的 `error_fallback` 不写入缓存，以便用户稍后重试真实模型。
 
 ## GET /api/settings/public
 

@@ -1,4 +1,4 @@
-import type { AdviceResponse, AdviceTone, AiProviderTestResult, AiSettingsPayload, BudgetPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction } from "./types";
+import type { AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, BudgetPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
 
@@ -101,9 +101,14 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
-  monthlyAdvice(month: string, tone: AdviceTone) {
-    return request<AdviceResponse>(`/api/ai/monthly-advice?month=${month}&tone=${tone}`, {
+  monthlyAdviceSnapshot(month: string, tone: AdviceTone) {
+    return request<AdviceSnapshot>(`/api/ai/monthly-advice?month=${month}&tone=${tone}`);
+  },
+  generateMonthlyAdvice(month: string, tone: AdviceTone) {
+    return request<AdviceSnapshot>(`/api/ai/monthly-advice?month=${month}&tone=${tone}`, {
+      method: "POST",
       timeoutMs: 100_000,
+      retryNetwork: false,
     });
   },
   settingsStatus() {

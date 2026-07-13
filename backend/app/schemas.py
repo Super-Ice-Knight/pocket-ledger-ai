@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 
 TransactionType = Literal["expense", "income"]
 AdviceTone = Literal["sharp", "warm"]
+AdviceSnapshotStatus = Literal["fresh", "stale", "missing"]
 ProviderSlot = Literal["primary", "backup", "local", "fallback"]
 AiProviderTestSlot = Literal["all", "primary", "backup"]
 
@@ -103,6 +104,12 @@ class AdviceResponse(BaseModel):
     action_items: list[str] = Field(default_factory=list, max_length=4)
     source: Literal["model", "local_rule", "error_fallback"]
     provider: ProviderSlot = "local"
+
+
+class AdviceSnapshot(BaseModel):
+    status: AdviceSnapshotStatus
+    advice: AdviceResponse | None = None
+    generated_at: datetime | None = None
 
 
 class SettingsStatus(BaseModel):

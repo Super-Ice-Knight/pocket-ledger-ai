@@ -662,6 +662,54 @@ textarea:focus {
   font-weight: 900;
 }
 
+.advice-cache-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border-left: 3px solid #71808a;
+  background: rgb(225 232 235 / 0.48);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.advice-cache-state.fresh {
+  border-left-color: #23766f;
+  background: rgb(216 239 234 / 0.52);
+  color: #205e5a;
+}
+
+.advice-cache-state.stale {
+  border-left-color: #ad7937;
+  background: rgb(245 231 204 / 0.58);
+  color: #795322;
+}
+
+.advice-cache-state svg {
+  flex: 0 0 auto;
+}
+
+.advice-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.advice-generate-button {
+  margin-left: auto;
+}
+
+.advice-inline-error {
+  color: #8b3028;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .action-list {
   display: flex;
   flex-wrap: wrap;

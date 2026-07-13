@@ -37,6 +37,8 @@
 - [ ] Groq 主接口测试成功，响应不包含 Key
 - [ ] AI 快记至少一次显示“主模型”
 - [ ] AI 财务点评至少一次显示真实 provider
+- [ ] 重新打开点评时命中 SQLite 缓存，不重复调用 Provider
+- [ ] 新增流水或修改预算后显示“待更新”，只有手动重新分析才调用模型
 - [ ] 所有已配置 Provider 不可用时测试返回 `error_fallback`
 - [ ] Vercel 无 CORS 或 `Failed to fetch` 错误
 - [ ] 冷启动期间显示“后端正在唤醒”，不会闪现零统计

@@ -33,11 +33,18 @@ import {
 } from "recharts";
 import { api } from "./api";
 import { centsToYuan, monthKey, yuanTextToCents } from "./money";
-import type { AdviceResponse, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType } from "./types";
+import type { AdviceResponse, AdviceSnapshot, AdviceTone, AiProviderTestResult, AiSettingsPayload, MonthlyStats, ParseResult, SettingsStatus, Transaction, TransactionType } from "./types";
 
 type ViewKey = "overview" | "quick" | "transactions" | "analytics" | "budget" | "settings";
 type DataStatus = "loading" | "waking" | "ready" | "error";
+type AdviceBusyState = "idle" | "cache" | "generate";
 type TransactionDraft = Omit<Transaction, "id" | "created_at">;
+
+const emptyAdviceSnapshot: AdviceSnapshot = {
+  status: "missing",
+  advice: null,
+  generated_at: null,
+};
 
 const emptyDraft: TransactionDraft = {
   amount_cents: 0,
@@ -117,7 +124,9 @@ function App() {
   const [month, setMonth] = useState(monthKey());
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [advice, setAdvice] = useState<AdviceResponse | null>(null);
+  const [adviceSnapshot, setAdviceSnapshot] = useState<AdviceSnapshot>(emptyAdviceSnapshot);
+  const [adviceBusy, setAdviceBusy] = useState<AdviceBusyState>("idle");
+  const [adviceError, setAdviceError] = useState("");
   const [tone, setTone] = useState<AdviceTone>("sharp");
   const [quickText, setQuickText] = useState("今天中午和室友吃疯狂星期四花了 50 块，微信付的");
   const [draft, setDraft] = useState<TransactionDraft>(emptyDraft);
@@ -136,6 +145,8 @@ function App() {
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
+  const adviceRequestId = useRef(0);
+  const adviceScope = useRef("");
 
   const displayStats = stats ?? {
     income_cents: 0,
@@ -150,7 +161,6 @@ function App() {
     recent_transactions: [],
     month,
   };
-
   const budgetStatus = useMemo(() => {
     if (!stats?.budget_limit_cents) return "未设置";
     if (stats.budget_usage_ratio >= 1) return "已超支";
@@ -202,22 +212,48 @@ function App() {
     }
   }
 
-  async function refreshAdvice() {
-    setAdvice(null);
+  async function loadCachedAdvice(force = false) {
+    const scope = `${month}:${tone}`;
+    if (!force && adviceScope.current === scope) return;
+    adviceScope.current = scope;
+    const requestId = ++adviceRequestId.current;
+    setAdviceSnapshot(emptyAdviceSnapshot);
+    setAdviceBusy("cache");
+    setAdviceError("");
     try {
-      const nextAdvice = await api.monthlyAdvice(month, tone);
-      setAdvice(nextAdvice);
-    } catch {
-      setAdvice({
-        tone,
-        advice: "AI 建议暂时不可用",
-        headline: "AI 建议暂时不可用",
-        detail: "本月基础数据已经加载，但建议接口没有返回。可以先查看预算、分类和流水，稍后再重新尝试生成分析。",
-        action_items: ["检查后端状态", "确认 API 配置"],
-        source: "error_fallback",
-        provider: "fallback",
-      });
+      const nextSnapshot = await api.monthlyAdviceSnapshot(month, tone);
+      if (requestId === adviceRequestId.current) setAdviceSnapshot(nextSnapshot);
+    } catch (err) {
+      if (requestId === adviceRequestId.current) {
+        adviceScope.current = "";
+        setAdviceError(err instanceof Error ? err.message : "读取已保存点评失败");
+      }
+    } finally {
+      if (requestId === adviceRequestId.current) setAdviceBusy("idle");
     }
+  }
+
+  async function generateAdvice() {
+    adviceScope.current = `${month}:${tone}`;
+    const requestId = ++adviceRequestId.current;
+    setAdviceBusy("generate");
+    setAdviceError("");
+    try {
+      const nextSnapshot = await api.generateMonthlyAdvice(month, tone);
+      if (requestId === adviceRequestId.current) setAdviceSnapshot(nextSnapshot);
+    } catch (err) {
+      if (requestId === adviceRequestId.current) {
+        setAdviceError(err instanceof Error ? err.message : "AI 点评生成失败");
+      }
+    } finally {
+      if (requestId === adviceRequestId.current) setAdviceBusy("idle");
+    }
+  }
+
+  function markAdviceStale() {
+    adviceRequestId.current += 1;
+    setAdviceBusy("idle");
+    setAdviceSnapshot((current) => current.advice ? { ...current, status: "stale" } : emptyAdviceSnapshot);
   }
 
   async function loadSettings() {
@@ -241,8 +277,8 @@ function App() {
   }, [month]);
 
   useEffect(() => {
-    refreshAdvice();
-  }, [month, tone]);
+    if (activeView === "overview" || activeView === "budget") loadCachedAdvice();
+  }, [activeView, month, tone]);
 
   useEffect(() => {
     loadSettings();
@@ -285,6 +321,7 @@ function App() {
       setParsed(null);
       setDraft({ ...emptyDraft, occurred_at: new Date().toISOString() });
       await refresh();
+      markAdviceStale();
       setActiveView(wasEditing ? "transactions" : "overview");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存失败");
@@ -298,6 +335,7 @@ function App() {
     try {
       await api.setBudget({ month, limit_cents: yuanTextToCents(budgetYuan), category: null });
       await refresh();
+      markAdviceStale();
     } catch (err) {
       setError(err instanceof Error ? err.message : "预算保存失败");
     }
@@ -310,6 +348,7 @@ function App() {
       await api.deleteTransaction(id);
       setPendingDelete(null);
       await refresh();
+      markAdviceStale();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败，请稍后重试");
       setPendingDelete(null);
@@ -446,7 +485,14 @@ function App() {
             </div>
             <div className="top-actions">
               <input aria-label="选择统计月份" type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
-              <button className="icon-button" onClick={() => refresh()} aria-label="刷新">
+              <button
+                className="icon-button"
+                onClick={() => {
+                  refresh();
+                  if (activeView === "overview" || activeView === "budget") loadCachedAdvice(true);
+                }}
+                aria-label="刷新"
+              >
                 <ArrowClockwise size={18} />
               </button>
             </div>
@@ -463,7 +509,10 @@ function App() {
                 displayStats={displayStats}
                 budgetStatus={budgetStatus}
                 transactionCount={transactions.length}
-                advice={advice}
+                adviceSnapshot={adviceSnapshot}
+                adviceBusy={adviceBusy}
+                adviceError={adviceError}
+                generateAdvice={generateAdvice}
                 tone={tone}
                 setTone={setTone}
                 topCategory={topCategory}
@@ -516,7 +565,10 @@ function App() {
                 budgetYuan={budgetYuan}
                 setBudgetYuan={setBudgetYuan}
                 saveBudget={saveBudget}
-                advice={advice}
+                adviceSnapshot={adviceSnapshot}
+                adviceBusy={adviceBusy}
+                adviceError={adviceError}
+                generateAdvice={generateAdvice}
                 tone={tone}
                 setTone={setTone}
               />
@@ -647,7 +699,10 @@ function OverviewPage({
   displayStats,
   budgetStatus,
   transactionCount,
-  advice,
+  adviceSnapshot,
+  adviceBusy,
+  adviceError,
+  generateAdvice,
   tone,
   setTone,
   topCategory,
@@ -661,7 +716,10 @@ function OverviewPage({
   displayStats: MonthlyStats;
   budgetStatus: string;
   transactionCount: number;
-  advice: AdviceResponse | null;
+  adviceSnapshot: AdviceSnapshot;
+  adviceBusy: AdviceBusyState;
+  adviceError: string;
+  generateAdvice: () => void;
   tone: AdviceTone;
   setTone: (tone: AdviceTone) => void;
   topCategory?: { name: string; amount_cents: number };
@@ -673,7 +731,14 @@ function OverviewPage({
   onOpenAnalytics: () => void;
 }) {
   const budgetPercent = Math.round(displayStats.budget_usage_ratio * 100);
-  const aiRuntimeLabel = advice ? providerLabel(advice.provider) : settingsStatus?.api_key_configured ? "模型连接中" : "本地规则";
+  const advice = adviceSnapshot.advice;
+  const aiRuntimeLabel = adviceBusy === "generate"
+    ? "模型分析中"
+    : adviceSnapshot.status === "stale"
+      ? "点评待更新"
+      : advice
+        ? providerLabel(advice.provider)
+        : settingsStatus?.api_key_configured ? "点评待生成" : "本地规则待生成";
   return (
     <div className="overview-page page-stack">
       <section className="command-board">
@@ -716,19 +781,15 @@ function OverviewPage({
 
       <section className="overview-grid">
         <div className="panel advice-panel">
-          <div className="panel-title">
-            <Brain size={20} />
-            <span>AI 财务点评</span>
-            <small className="provider-badge">{advice ? providerLabel(advice.provider) : "生成中"}</small>
-          </div>
-          <div className="advice-copy">
-            <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
-            <p>{advice?.detail || "AI 正在根据本月收入、支出、预算、分类和账户分布生成详细分析。"}</p>
-          </div>
-          <div className="segmented">
-            <button aria-pressed={tone === "sharp"} className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
-            <button aria-pressed={tone === "warm"} className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
-          </div>
+          <AdvicePanelContent
+            title="AI 财务点评"
+            snapshot={adviceSnapshot}
+            busy={adviceBusy}
+            error={adviceError}
+            tone={tone}
+            setTone={setTone}
+            onGenerate={generateAdvice}
+          />
         </div>
         <div className="panel insight-panel">
           <div className="insight-grid">
@@ -932,7 +993,10 @@ function BudgetPage({
   budgetYuan,
   setBudgetYuan,
   saveBudget,
-  advice,
+  adviceSnapshot,
+  adviceBusy,
+  adviceError,
+  generateAdvice,
   tone,
   setTone,
 }: {
@@ -941,7 +1005,10 @@ function BudgetPage({
   budgetYuan: string;
   setBudgetYuan: (value: string) => void;
   saveBudget: () => void;
-  advice: AdviceResponse | null;
+  adviceSnapshot: AdviceSnapshot;
+  adviceBusy: AdviceBusyState;
+  adviceError: string;
+  generateAdvice: () => void;
   tone: AdviceTone;
   setTone: (tone: AdviceTone) => void;
 }) {
@@ -968,27 +1035,107 @@ function BudgetPage({
         <button className="primary-button full" onClick={saveBudget}>保存预算</button>
       </section>
       <section className="panel advice-panel budget-advice">
-        <div className="panel-title">
-          <Brain size={20} />
-          <span>预算建议</span>
-          <small className="provider-badge">{advice ? providerLabel(advice.provider) : "生成中"}</small>
-        </div>
-        <div className="advice-copy">
-          <strong>{advice?.headline || advice?.advice || "正在生成建议..."}</strong>
-          <p>{advice?.detail || "AI 正在结合预算使用率、最高分类、主要账户和日均支出生成建议。"}</p>
-        </div>
-        <div className="action-list">
-          {(advice?.action_items?.length ? advice.action_items : ["等待分析结果", "先保持记账"]).map((item) => (
-            <span key={item}>{item}</span>
-          ))}
-        </div>
-        <div className="segmented">
-          <button aria-pressed={tone === "sharp"} className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
-          <button aria-pressed={tone === "warm"} className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
-        </div>
+        <AdvicePanelContent
+          title="预算建议"
+          snapshot={adviceSnapshot}
+          busy={adviceBusy}
+          error={adviceError}
+          tone={tone}
+          setTone={setTone}
+          onGenerate={generateAdvice}
+          showActions
+        />
       </section>
     </div>
   );
+}
+
+function AdvicePanelContent({
+  title,
+  snapshot,
+  busy,
+  error,
+  tone,
+  setTone,
+  onGenerate,
+  showActions = false,
+}: {
+  title: string;
+  snapshot: AdviceSnapshot;
+  busy: AdviceBusyState;
+  error: string;
+  tone: AdviceTone;
+  setTone: (tone: AdviceTone) => void;
+  onGenerate: () => void;
+  showActions?: boolean;
+}) {
+  const advice = snapshot.advice;
+  const isGenerating = busy === "generate";
+  const needsGeneration = snapshot.status !== "fresh" || advice?.source === "error_fallback";
+  const badge = isGenerating
+    ? "分析中"
+    : busy === "cache"
+      ? "读取缓存"
+      : snapshot.status === "stale"
+        ? "待更新"
+        : advice ? providerLabel(advice.provider) : "尚未生成";
+  const headline = advice?.headline || advice?.advice || (isGenerating ? "正在生成本月点评" : "本月还没有 AI 点评");
+  const detail = advice?.detail || (
+    isGenerating
+      ? "AI 正在根据已确认的账单和预算生成结论，生成成功后会保存到 SQLite。"
+      : "点击生成后才会调用模型；如果本月数据没有变化，下次会直接展示已保存的结果。"
+  );
+  let cacheMessage = "不会自动调用模型";
+  if (busy === "cache") cacheMessage = "正在读取 SQLite 中的已保存点评";
+  else if (isGenerating) cacheMessage = "本次由用户手动触发，生成后自动缓存";
+  else if (snapshot.status === "stale") cacheMessage = "账单或预算已变化，当前点评基于上一版数据";
+  else if (advice?.source === "error_fallback") cacheMessage = "模型调用失败，本次兜底结果未写入缓存";
+  else if (snapshot.generated_at) cacheMessage = `数据未变化，直接读取 ${formatAdviceTime(snapshot.generated_at)} 的结果`;
+
+  return <>
+    <div className="panel-title">
+      <Brain size={20} />
+      <span>{title}</span>
+      <small className="provider-badge">{badge}</small>
+    </div>
+    <div className="advice-copy" aria-live="polite" aria-busy={busy !== "idle"}>
+      <strong>{headline}</strong>
+      <p>{detail}</p>
+    </div>
+    <div className={`advice-cache-state ${snapshot.status}`}>
+      <Database size={16} />
+      <span>{cacheMessage}</span>
+    </div>
+    {showActions && advice?.action_items?.length ? (
+      <div className="action-list">
+        {advice.action_items.map((item) => <span key={item}>{item}</span>)}
+      </div>
+    ) : null}
+    {error && <div className="advice-inline-error" role="alert">{error}</div>}
+    <div className="advice-controls">
+      <div className="segmented">
+        <button disabled={busy !== "idle"} aria-pressed={tone === "sharp"} className={tone === "sharp" ? "selected" : ""} onClick={() => setTone("sharp")}>直接</button>
+        <button disabled={busy !== "idle"} aria-pressed={tone === "warm"} className={tone === "warm" ? "selected" : ""} onClick={() => setTone("warm")}>温和</button>
+      </div>
+      {(needsGeneration || isGenerating) && (
+        <button className="primary-button advice-generate-button" onClick={onGenerate} disabled={busy !== "idle"}>
+          <Brain size={18} />
+          {isGenerating ? "分析中" : advice ? "重新分析" : "生成点评"}
+        </button>
+      )}
+    </div>
+  </>;
+}
+
+function formatAdviceTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "上次";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function SettingsPage({

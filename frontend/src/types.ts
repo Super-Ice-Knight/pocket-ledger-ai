@@ -52,6 +52,12 @@ export interface AdviceResponse {
   provider: "primary" | "backup" | "local" | "fallback";
 }
 
+export interface AdviceSnapshot {
+  status: "fresh" | "stale" | "missing";
+  advice: AdviceResponse | null;
+  generated_at: string | null;
+}
+
 export interface SettingsStatus {
   openai_base_url: string;
   openai_model: string;

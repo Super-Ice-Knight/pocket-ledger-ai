@@ -408,15 +408,27 @@ def test_monthly_advice_returns_structured_local_payload(tmp_path: Path, monkeyp
     init_db()
     client = TestClient(app)
 
-    response = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    cached_before_generation = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    response = client.post("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    cached_after_generation = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
 
+    assert cached_before_generation.status_code == 200
+    assert cached_before_generation.json() == {
+        "status": "missing",
+        "advice": None,
+        "generated_at": None,
+    }
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["advice"]
     assert body["source"] == "local_rule"
     assert body["provider"] == "local"
     assert body["advice"] == body["headline"]
     assert body["detail"]
     assert len(body["action_items"]) >= 2
+    assert response.json()["status"] == "fresh"
+    assert response.json()["generated_at"]
+    assert cached_after_generation.json()["status"] == "fresh"
+    assert cached_after_generation.json()["advice"] == body
 
 
 def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
@@ -474,10 +486,13 @@ def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
         },
     )
 
-    response = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    cached_before_generation = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    response = client.post("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+    cached_after_generation = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["advice"]
+    assert cached_before_generation.json()["status"] == "missing"
     assert calls == ["primary-model"]
     assert body["source"] == "model"
     assert body["provider"] == "primary"
@@ -485,3 +500,27 @@ def test_monthly_advice_uses_model_structured_json(tmp_path: Path, monkeypatch):
     assert "小额高频" in body["detail"]
     assert body["action_items"] == ["减少饮品频率", "复盘餐饮明细"]
     assert "primary-secret" not in response.text
+    assert cached_after_generation.json()["status"] == "fresh"
+    assert cached_after_generation.json()["advice"] == body
+    assert calls == ["primary-model"]
+
+    transaction_response = client.post(
+        "/api/transactions",
+        json={
+            "amount_cents": 5000,
+            "type": "expense",
+            "category": "餐饮",
+            "account": "微信",
+            "occurred_at": "2026-07-12T12:00:00",
+            "note": "新增支出",
+            "raw_text": "午餐花50元",
+            "tags": [],
+        },
+    )
+    stale_after_change = client.get("/api/ai/monthly-advice?month=2026-07&tone=sharp")
+
+    assert transaction_response.status_code == 200
+    assert stale_after_change.status_code == 200
+    assert stale_after_change.json()["status"] == "stale"
+    assert stale_after_change.json()["advice"] == body
+    assert calls == ["primary-model"]
