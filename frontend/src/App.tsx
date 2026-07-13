@@ -444,35 +444,37 @@ function App() {
         </header>
 
         <aside className="side-rail">
-          <div className="brand-zone">
-            <div className="brand-mark">
-              <Wallet size={25} weight="duotone" />
+          <div className="side-rail-sticky">
+            <div className="brand-zone">
+              <div className="brand-mark">
+                <Wallet size={25} weight="duotone" />
+              </div>
+              <div>
+                <strong>口袋记账</strong>
+                <span>AI Ledger</span>
+              </div>
             </div>
-            <div>
-              <strong>口袋记账</strong>
-              <span>AI Ledger</span>
+            <nav className="rail-nav" aria-label="主导航">
+              {navItems.map((item) => (
+                <button
+                  key={item.key}
+                  className={`rail-item ${activeView === item.key ? "active" : ""}`}
+                  onClick={() => setActiveView(item.key)}
+                  aria-current={activeView === item.key ? "page" : undefined}
+                >
+                  {item.icon}
+                  <span>
+                    <b>{item.label}</b>
+                    <small>{item.helper}</small>
+                  </span>
+                </button>
+              ))}
+            </nav>
+            <div className="rail-note">
+              <span>SQLite</span>
+              <strong>整数分存储</strong>
+              <small>{settingsStatus?.api_key_configured ? "模型接口已配置" : "本地规则可兜底"}</small>
             </div>
-          </div>
-          <nav className="rail-nav" aria-label="主导航">
-            {navItems.map((item) => (
-              <button
-                key={item.key}
-                className={`rail-item ${activeView === item.key ? "active" : ""}`}
-                onClick={() => setActiveView(item.key)}
-                aria-current={activeView === item.key ? "page" : undefined}
-              >
-                {item.icon}
-                <span>
-                  <b>{item.label}</b>
-                  <small>{item.helper}</small>
-                </span>
-              </button>
-            ))}
-          </nav>
-          <div className="rail-note">
-            <span>SQLite</span>
-            <strong>整数分存储</strong>
-            <small>{settingsStatus?.api_key_configured ? "模型接口已配置" : "本地规则可兜底"}</small>
           </div>
         </aside>
 

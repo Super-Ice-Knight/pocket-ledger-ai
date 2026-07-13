@@ -82,7 +82,7 @@ textarea:disabled {
   color: var(--ink);
   position: relative;
   isolation: isolate;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .app-root::before,
@@ -120,19 +120,24 @@ textarea:disabled {
 }
 
 .side-rail {
-  position: sticky;
-  top: 16px;
-  height: calc(100dvh - 32px);
+  min-height: calc(100dvh - 32px);
+  align-self: stretch;
   border: 1px solid rgb(255 255 255 / 0.72);
   border-radius: 24px;
   background:
     linear-gradient(138deg, rgb(255 255 255 / 0.82), rgb(222 230 232 / 0.52) 52%, rgb(180 193 199 / 0.42)),
     var(--surface);
   color: var(--ink);
-  padding: 18px;
   box-shadow: var(--shadow-hard);
   backdrop-filter: blur(24px) saturate(1.35);
   -webkit-backdrop-filter: blur(24px) saturate(1.35);
+}
+
+.side-rail-sticky {
+  position: sticky;
+  top: 16px;
+  min-height: calc(100dvh - 32px);
+  padding: 18px;
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 26px;
@@ -1527,8 +1532,12 @@ textarea {
   }
 
   .side-rail {
+    min-height: auto;
+  }
+
+  .side-rail-sticky {
     position: static;
-    height: auto;
+    min-height: auto;
   }
 
   .rail-nav {
