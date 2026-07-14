@@ -8,6 +8,11 @@ class MoneyParseError(ValueError):
 
 MAX_TRANSACTION_AMOUNT_CENTS = 9_999_999_999
 AMOUNT_PATTERN = r"\d+(?:\.\d{1,4})?"
+QUANTITY_UNIT_PATTERN = r"(?:杯|个|份|张|次|本|件|盒|公里|小时|人)"
+FOREIGN_CURRENCY_PATTERN = (
+    r"(?:US\$|HK\$|\$|€|£|\b(?:USD|EUR|GBP|JPY|HKD|KRW)\b|"
+    r"美元|美金|欧元|英镑|日元|港币|韩元)"
+)
 
 
 def parse_yuan_to_cents(value: str | int | float | Decimal) -> int:
@@ -29,6 +34,10 @@ def parse_yuan_to_cents(value: str | int | float | Decimal) -> int:
 
 def extract_transaction_amount_cents(text: str) -> int:
     normalized = str(text).strip()
+    if re.search(FOREIGN_CURRENCY_PATTERN, normalized, flags=re.IGNORECASE):
+        raise MoneyParseError("暂不支持把外币金额直接记为人民币")
+    if re.search(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", normalized):
+        raise MoneyParseError("带千位分隔符的金额需要手动确认")
     explicit_patterns = [
         rf"[¥￥]\s*(?P<amount>{AMOUNT_PATTERN})",
         rf"(?P<amount>{AMOUNT_PATTERN})\s*(?:元|块|人民币|RMB)",
@@ -37,17 +46,24 @@ def extract_transaction_amount_cents(text: str) -> int:
             rf"共计|合计|共|金额(?:是|为)?)\s*[¥￥]?\s*(?P<amount>{AMOUNT_PATTERN})"
         ),
     ]
+    explicit_candidates: dict[tuple[int, int], str] = {}
     for pattern in explicit_patterns:
-        match = re.search(pattern, normalized, flags=re.IGNORECASE)
-        if match:
-            return parse_yuan_to_cents(match.group("amount"))
+        for match in re.finditer(pattern, normalized, flags=re.IGNORECASE):
+            amount_span = match.span("amount")
+            if re.match(rf"\s*{QUANTITY_UNIT_PATTERN}", normalized[amount_span[1]:]):
+                continue
+            explicit_candidates[amount_span] = match.group("amount")
+    if len(explicit_candidates) == 1:
+        return parse_yuan_to_cents(next(iter(explicit_candidates.values())))
+    if len(explicit_candidates) > 1:
+        raise MoneyParseError("检测到多个金额，请拆分或手动确认")
 
     cleaned = re.sub(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*[日号]?", " ", normalized)
     cleaned = re.sub(r"\d{1,2}\s*月\s*\d{1,2}\s*[日号]", " ", cleaned)
     cleaned = re.sub(r"\d{1,2}\s*[:：]\s*\d{2}", " ", cleaned)
     cleaned = re.sub(r"\d{1,2}\s*(?:点|时)", " ", cleaned)
     cleaned = re.sub(
-        rf"{AMOUNT_PATTERN}\s*(?:杯|个|份|张|次|本|件|盒|公里|小时|人)",
+        rf"{AMOUNT_PATTERN}\s*{QUANTITY_UNIT_PATTERN}",
         " ",
         cleaned,
     )

@@ -61,11 +61,51 @@ def test_local_parser_marks_ambiguous_number_only_input_for_review():
     assert "amount_cents" in result.missing_fields
 
 
+def test_local_parser_does_not_guess_between_multiple_money_amounts():
+    result = local_parse("原价100元，优惠20元，实付80元，支付宝")
+
+    assert result.amount_cents == 0
+    assert "amount_cents" in result.missing_fields
+
+
+def test_local_parser_does_not_mistake_a_group_size_for_another_amount():
+    result = local_parse("共3人吃饭，微信花50元")
+
+    assert result.amount_cents == 5000
+    assert "amount_cents" not in result.missing_fields
+
+
+def test_local_parser_does_not_treat_foreign_currency_as_yuan():
+    result = local_parse("10美元买会员，信用卡")
+
+    assert result.amount_cents == 0
+    assert "amount_cents" in result.missing_fields
+
+
+def test_local_parser_does_not_drop_thousands_before_a_comma():
+    result = local_parse("1,200.50元买电脑，银行卡")
+
+    assert result.amount_cents == 0
+    assert "amount_cents" in result.missing_fields
+
+
 def test_local_parser_resolves_relative_dates():
     today = datetime.now().date()
     assert local_parse("今天咖啡 24 块微信").occurred_at.date() == today
     assert local_parse("昨天咖啡 24 块微信").occurred_at.date() == today - timedelta(days=1)
     assert local_parse("前天咖啡 24 块微信").occurred_at.date() == today - timedelta(days=2)
+
+
+def test_local_parser_marks_unresolved_explicit_date_for_confirmation():
+    result = local_parse("7月11日买咖啡20元，支付宝")
+
+    assert "occurred_at" in result.missing_fields
+
+
+def test_local_parser_marks_conflicting_income_and_expense_cues_for_confirmation():
+    result = local_parse("用工资买书花50元，微信支付")
+
+    assert "type" in result.missing_fields
 
 
 def test_transaction_can_be_created_and_retrieved(tmp_path: Path):

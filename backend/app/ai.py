@@ -74,6 +74,8 @@ logger = logging.getLogger("pocket_ledger.ai")
 def local_parse(text: str) -> ParseResult:
     missing: list[str] = []
     occurred_at = detect_occurred_at(text)
+    if has_unresolved_explicit_date(text):
+        missing.append("occurred_at")
     try:
         amount_cents = extract_transaction_amount_cents(text)
     except MoneyParseError:
@@ -81,7 +83,9 @@ def local_parse(text: str) -> ParseResult:
         missing.append("amount_cents")
     category = detect_category(text)
     account = detect_account(text)
-    tx_type = "income" if category == "收入" or any(word in text for word in ["收入", "工资", "兼职", "奖学金", "报销"]) else "expense"
+    tx_type, type_conflicted = detect_transaction_type(text, category)
+    if type_conflicted:
+        missing.append("type")
     note = build_note(text, category, account)
     if category == "其他":
         missing.append("category")
@@ -117,6 +121,20 @@ def detect_account(text: str) -> str:
     return "未指定"
 
 
+def detect_transaction_type(text: str, category: str) -> tuple[str, bool]:
+    income_detected = category == "收入" or bool(
+        re.search(r"收入|工资|兼职|奖学金|报销|退款|返现|到账|进账|收款|收到|转入|转给我|给我转", text)
+    )
+    expense_detected = bool(
+        re.search(r"花了|花费|花掉|花(?=\s*[¥￥]?\d)|消费|支出|付款|付了|实付|扣款|购买|买|转出|我转给|办卡", text)
+    )
+    if income_detected and expense_detected:
+        return "expense", True
+    if income_detected:
+        return "income", False
+    return "expense", False
+
+
 def normalize_category(value: object, fallback: str) -> str:
     category = str(value or "").strip()
     if not category:
@@ -148,6 +166,17 @@ def build_note(text: str, category: str, account: str) -> str:
 
 def has_relative_date(text: str) -> bool:
     return any(word in text for word in ["今天", "今日", "昨天", "昨日", "前天"])
+
+
+def has_unresolved_explicit_date(text: str) -> bool:
+    if has_relative_date(text):
+        return False
+    patterns = [
+        r"\d{4}\s*(?:年|[-/.])\s*\d{1,2}\s*(?:月|[-/.])\s*\d{1,2}\s*[日号]?",
+        r"(?<!\d)\d{1,2}\s*月\s*\d{1,2}\s*[日号]?",
+        r"(?:上周|本周|这周|下周|周|星期)[一二三四五六日天]",
+    ]
+    return any(re.search(pattern, text) for pattern in patterns)
 
 
 def detect_occurred_at(text: str, now: datetime | None = None) -> datetime:

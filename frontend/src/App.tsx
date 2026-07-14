@@ -41,7 +41,7 @@ type ViewKey = "overview" | "quick" | "transactions" | "analytics" | "budget" | 
 type DataStatus = "loading" | "waking" | "ready" | "error";
 type AdviceBusyState = "idle" | "cache" | "generate";
 type LedgerPeriod = "month" | "week";
-type TransactionDraft = Omit<Transaction, "id" | "created_at">;
+type TransactionDraft = Omit<Transaction, "id" | "created_at" | "type"> & { type: TransactionType | "" };
 type LedgerSummary = Pick<WeeklyStats, "income_cents" | "expense_cents" | "balance_cents" | "transaction_count">;
 
 const emptyAdviceSnapshot: AdviceSnapshot = {
@@ -366,10 +366,10 @@ function App() {
       setParsedSourceText(sourceText);
       setDraft({
         amount_cents: result.amount_cents,
-        type: result.type,
-        category: result.category,
-        account: result.account,
-        occurred_at: result.occurred_at,
+        type: result.missing_fields.includes("type") ? "" : result.type,
+        category: result.missing_fields.includes("category") ? "" : result.category,
+        account: result.missing_fields.includes("account") ? "" : result.account,
+        occurred_at: result.missing_fields.includes("occurred_at") ? "" : result.occurred_at,
         note: result.note,
         raw_text: result.raw_text,
         tags: result.tags || [],
@@ -390,10 +390,18 @@ function App() {
     setError("");
     const wasEditing = Boolean(editingId);
     try {
+      if (!nextDraft.type) {
+        setError("请选择收入或支出类型");
+        return;
+      }
+      const payload: Omit<Transaction, "id" | "created_at"> = {
+        ...nextDraft,
+        type: nextDraft.type,
+      };
       if (editingId) {
-        await api.updateTransaction(editingId, nextDraft);
+        await api.updateTransaction(editingId, payload);
       } else {
-        await api.createTransaction(nextDraft);
+        await api.createTransaction(payload);
       }
       setEditingId(null);
       setParsed(null);
@@ -1584,7 +1592,7 @@ function fieldDisplayName(field: string): string {
 
 function isDraftFieldUnresolved(field: string, draft: TransactionDraft): boolean {
   if (field === "amount_cents") return draft.amount_cents <= 0;
-  if (field === "category") return !draft.category || draft.category === "其他";
+  if (field === "category") return !draft.category;
   if (field === "account") return !draft.account || draft.account === "未指定";
   if (field === "occurred_at") return !draft.occurred_at;
   if (field === "type") return !draft.type;
@@ -1720,6 +1728,7 @@ function TransactionForm({
       <label className="field-block">
         <span>类型</span>
         <select value={draft.type} onChange={(event) => update("type", event.target.value as TransactionType)}>
+          <option value="" disabled>请选择类型</option>
           <option value="expense">支出</option>
           <option value="income">收入</option>
         </select>
@@ -1727,12 +1736,14 @@ function TransactionForm({
       <label className="field-block">
         <span>分类</span>
         <select value={draft.category} onChange={(event) => update("category", event.target.value)}>
+          <option value="" disabled>请选择分类</option>
           {categories.map((category) => <option key={category}>{category}</option>)}
         </select>
       </label>
       <label className="field-block">
         <span>账户</span>
         <select value={draft.account} onChange={(event) => update("account", event.target.value)}>
+          <option value="" disabled>请选择账户</option>
           {accounts.map((account) => <option key={account} disabled={account === "未指定"}>{account}</option>)}
         </select>
       </label>

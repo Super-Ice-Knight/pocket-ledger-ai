@@ -50,7 +50,11 @@ async function fulfillJson(route: Route, json: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(json) });
 }
 
-async function installStandardMocks(page: Page, captured: { create?: Record<string, unknown>; updates: number }) {
+async function installStandardMocks(
+  page: Page,
+  captured: { create?: Record<string, unknown>; updates: number },
+  parseOverrides: Record<string, unknown> = {},
+) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -75,6 +79,7 @@ async function installStandardMocks(page: Page, captured: { create?: Record<stri
         provider: "primary",
         missing_fields: [],
         needs_review: true,
+        ...parseOverrides,
       });
     }
     if (url.pathname === "/api/transactions" && request.method() === "POST") {
@@ -91,6 +96,51 @@ async function installStandardMocks(page: Page, captured: { create?: Record<stri
     return fulfillJson(route, { ok: true });
   });
 }
+
+
+test("a user can explicitly confirm the Other category", async ({ page }) => {
+  const captured: { create?: Record<string, unknown>; updates: number } = { updates: 0 };
+  await installStandardMocks(page, captured, {
+    category: "其他",
+    missing_fields: ["category"],
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /^AI 快记/ }).click();
+  await page.getByRole("button", { name: "解析账单" }).click();
+
+  const category = page.getByLabel("分类");
+  await expect(category).toHaveValue("");
+  await expect(page.getByRole("button", { name: "确认入账" })).toBeDisabled();
+
+  await category.selectOption("其他");
+  await expect(page.getByRole("button", { name: "确认入账" })).toBeEnabled();
+  await page.getByRole("button", { name: "确认入账" }).click();
+
+  await expect.poll(() => captured.create?.category).toBe("其他");
+});
+
+
+test("ambiguous type and time must be resolved before saving", async ({ page }) => {
+  const captured: { create?: Record<string, unknown>; updates: number } = { updates: 0 };
+  await installStandardMocks(page, captured, {
+    type: "expense",
+    occurred_at: "2026-07-14T18:00:00+08:00",
+    missing_fields: ["type", "occurred_at"],
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /^AI 快记/ }).click();
+  await page.getByRole("button", { name: "解析账单" }).click();
+
+  await expect(page.getByLabel("类型")).toHaveValue("");
+  await expect(page.getByLabel("交易时间")).toHaveValue("");
+  await expect(page.getByRole("button", { name: "确认入账" })).toBeDisabled();
+
+  await page.getByLabel("类型").selectOption("expense");
+  await page.getByLabel("交易时间").fill("2026-07-11T20:30");
+  await expect(page.getByRole("button", { name: "确认入账" })).toBeEnabled();
+});
 
 
 test("quick entry invalidates stale AI draft, saves edited time, and can cancel editing", async ({ page }) => {
