@@ -13,7 +13,7 @@
 
 - 在线演示：[pocket-ledger-ai.vercel.app](https://pocket-ledger-ai.vercel.app/)
 - GitHub：[Super-Ice-Knight/pocket-ledger-ai](https://github.com/Super-Ice-Knight/pocket-ledger-ai)
-- 后端 API：[pocket-ledger-ai.onrender.com](https://pocket-ledger-ai.onrender.com/)
+- 后端服务（休眠时显示 Render 唤醒页，启动后返回 JSON）：[pocket-ledger-ai.onrender.com](https://pocket-ledger-ai.onrender.com/)
 - 健康检查：[GET /api/health](https://pocket-ledger-ai.onrender.com/api/health)
 - Swagger 文档：[FastAPI /docs](https://pocket-ledger-ai.onrender.com/docs)
 
@@ -121,14 +121,15 @@ render.yaml            Render 部署配置
 
 ```powershell
 cd backend
-python -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 copy ..\.env.example .env
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 后端地址为 `http://127.0.0.1:8000`，接口文档为 `http://127.0.0.1:8000/docs`。
+Windows 下显式使用 `py -3.11` 创建虚拟环境，避免系统默认 Python 3.14 导致已知的依赖构建问题。
 
 ### 2. 前端
 

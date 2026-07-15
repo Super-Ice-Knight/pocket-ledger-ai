@@ -1,6 +1,6 @@
 # 最终发布检查表
 
-已提交验证基线：`38f91ab`（2026-07-13）。当前待提交工作区在此基础上补充歧义输入确认，勾选项必须有自动化、浏览器、线上接口或仓库检查证据；录制前动作仍保持未勾选。
+当前交付基线：`1f60c36`（2026-07-14）。`38f91ab` 是上一轮功能验收基线（29 项 pytest、5 项 Playwright）；`1f60c36` 在此基础上收紧歧义输入确认并完成文档收口（35 项 pytest、7 项 Playwright）。勾选项必须有自动化、浏览器、线上接口或仓库检查证据；录制前动作仍保持未勾选。
 
 ## 固定入口
 
@@ -19,11 +19,11 @@
 - [x] 仓库不包含 `.env`、`.db`、`.venv`、`node_modules`、`dist`
 - [x] GitHub 中不存在真实 Key 或本机绝对路径
 
-当前本地基线：35 项后端测试、7 项 Playwright 测试、前端生产构建全部通过。
+当前本地基线 `1f60c36`：35 项后端测试、7 项 Playwright 测试、前端生产构建全部通过。
 
 2026-07-13 提交 `38f91ab` 的本地 Agent 验收：29 项 pytest、5 项 Playwright 与 Vite 生产构建通过；`1440×900` 与 `390×844` 六个页面无横向溢出；跨月周 `2026/6/29 - 7/5` 的周期统计与日期范围明细一致；交易时间可编辑并按北京时间保存；快速切月和切周都只允许最后一次请求更新页面。
 
-2026-07-14 当前工作区复验：35 项 pytest、7 项 Playwright、Vite 生产构建与 `git diff --check` 通过；新增覆盖多个金额、数量与金额并存、外币、千位分隔符、明确日期、冲突收支类型，以及用户显式确认“其他”分类。线上检查仍以本表“线上行为”部分为准。
+2026-07-14 提交 `1f60c36` 复验：35 项 pytest、7 项 Playwright、Vite 生产构建与 `git diff --check` 通过；新增覆盖多个金额、数量与金额并存、外币、千位分隔符、明确日期、冲突收支类型，以及用户显式确认“其他”分类。线上检查仍以本表“线上行为”部分为准。
 
 ## Render 环境变量
 
@@ -34,7 +34,7 @@
 - [x] `BACKUP_OPENAI_COMPATIBLE_*` 未配置，`backup_enabled=false`
 - [x] `AI_REQUEST_TIMEOUT_SECONDS=10`
 - [x] `RUNTIME_AI_SETTINGS_WRITABLE=false`
-- [ ] `SEED_DEMO_DATA=true`（公开演示）或 `false`（个人账本）
+- [ ] Render 后台已确认 `SEED_DEMO_DATA=true`（公开演示）或 `false`（个人账本）；`render.yaml` 默认为 `true`，手动创建的服务仍需核对实际环境变量
 - [x] `CORS_ALLOWED_ORIGINS=https://pocket-ledger-ai.vercel.app`
 
 ## 线上行为
@@ -89,7 +89,7 @@
 
 ## 文档
 
-- [x] README 链接和截图与 `38f91ab` 当前界面一致
+- [x] README 链接和截图与 `1f60c36` 当前界面一致
 - [x] AI_LOG 包含两个核心 Prompt、真实 Debug、提交索引和验收证据
 - [x] DEFENSE_NOTES 能解释金额、AI 点评缓存、SQLite、设置安全和冷启动
 - [x] API_SPEC 包含月/周流水、点评 GET/POST 契约、`fresh/stale/missing`、只读设置字段与 403 行为
