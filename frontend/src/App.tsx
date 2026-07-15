@@ -78,32 +78,32 @@ const navItems: Array<{ key: ViewKey; label: string; helper: string; icon: React
 
 const pageCopy: Record<ViewKey, { eyebrow: string; title: string; description: string }> = {
   overview: {
-    eyebrow: "Command center",
+    eyebrow: "财务中枢",
     title: "本月财务总览",
     description: "查看本月收支、预算余额和主要消费去向。",
   },
   quick: {
-    eyebrow: "Quick entry",
+    eyebrow: "智能录入",
     title: "一句话记账",
     description: "描述一笔收入或支出，核对账单信息后保存。",
   },
   transactions: {
-    eyebrow: "Ledger",
+    eyebrow: "账本流水",
     title: "收支流水",
     description: "按月或按周查看收入、支出和每笔明细。",
   },
   analytics: {
-    eyebrow: "Analytics",
+    eyebrow: "数据洞察",
     title: "消费分析",
     description: "查看消费趋势、分类占比和常用付款账户。",
   },
   budget: {
-    eyebrow: "Budget",
+    eyebrow: "预算管理",
     title: "月度预算",
     description: "设置本月预算，查看剩余额度和消费建议。",
   },
   settings: {
-    eyebrow: "Settings",
+    eyebrow: "模型设置",
     title: "AI 设置",
     description: "配置用于智能记账和财务点评的模型服务。",
   },
@@ -548,7 +548,7 @@ function App() {
             </div>
             <div>
               <strong>口袋记账</strong>
-              <span>AI Ledger</span>
+              <span>智能账本</span>
             </div>
           </div>
           <button
@@ -569,7 +569,7 @@ function App() {
               </div>
               <div>
                 <strong>口袋记账</strong>
-                <span>AI Ledger</span>
+                <span>智能账本</span>
               </div>
             </div>
             <nav className="rail-nav" aria-label="主导航">
@@ -1154,7 +1154,7 @@ function AnalyticsPage({
       <section className="panel chart-panel">
         <div className="section-heading">
           <div>
-            <span className="kicker">Trend</span>
+            <span className="kicker">趋势</span>
             <h2>消费趋势</h2>
           </div>
         </div>
@@ -1234,7 +1234,7 @@ function BudgetPage({
       <section className="panel budget-panel">
         <div className="section-heading">
           <div>
-            <span className="kicker">Risk line</span>
+            <span className="kicker">风险线</span>
             <h2>预算状态</h2>
           </div>
           <span className={`status-pill ${budgetStatus === "已超支" ? "danger" : ""}`}>{budgetStatus}</span>
@@ -1446,12 +1446,12 @@ function SettingsPage({
               />
             </label>
             {writable === true && <label className="field-block">
-              <span>API Key</span>
+              <span>API 密钥</span>
               <input
                 type="password"
                 value={apiSecretDraft}
                 onChange={(event) => setApiSecretDraft(event.target.value)}
-                placeholder={settingsStatus?.primary_api_key_configured ? "已配置，留空则保留" : "输入 API Key"}
+                placeholder={settingsStatus?.primary_api_key_configured ? "已配置，留空则保留" : "输入 API 密钥"}
               />
             </label>}
           </div>
@@ -1476,12 +1476,12 @@ function SettingsPage({
               />
             </label>
             {writable === true && <label className="field-block">
-              <span>API Key</span>
+              <span>API 密钥</span>
               <input
                 type="password"
                 value={backupSecretDraft}
                 onChange={(event) => setBackupSecretDraft(event.target.value)}
-                placeholder={settingsStatus?.backup_api_key_configured ? "已配置，留空则保留" : "输入备用 API Key"}
+                placeholder={settingsStatus?.backup_api_key_configured ? "已配置，留空则保留" : "输入备用 API 密钥"}
               />
             </label>}
           </div>
