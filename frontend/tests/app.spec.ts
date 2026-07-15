@@ -134,11 +134,11 @@ test("ambiguous type and time must be resolved before saving", async ({ page }) 
   await page.getByRole("button", { name: "解析账单" }).click();
 
   await expect(page.getByLabel("类型")).toHaveValue("");
-  await expect(page.getByLabel("交易时间")).toHaveValue("");
+  await expect(page.getByLabel("记账时间")).toHaveValue("");
   await expect(page.getByRole("button", { name: "确认入账" })).toBeDisabled();
 
   await page.getByLabel("类型").selectOption("expense");
-  await page.getByLabel("交易时间").fill("2026-07-11T20:30");
+  await page.getByLabel("记账时间").fill("2026-07-11T20:30");
   await expect(page.getByRole("button", { name: "确认入账" })).toBeEnabled();
 });
 
@@ -153,7 +153,7 @@ test("quick entry invalidates stale AI draft, saves edited time, and can cancel 
   const description = page.getByLabel("自然语言账单描述");
   await page.getByRole("button", { name: "解析账单" }).click();
   await expect(page.getByText("主模型已完成解析")).toBeVisible();
-  await expect(page.getByLabel("交易时间")).toHaveValue("2026-07-12T12:00");
+  await expect(page.getByLabel("记账时间")).toHaveValue("2026-07-12T12:00");
   await expect(page.getByRole("button", { name: "确认入账" })).toBeEnabled();
 
   await description.fill("今天午餐改成了60元，微信付的");
@@ -163,7 +163,7 @@ test("quick entry invalidates stale AI draft, saves edited time, and can cancel 
   await page.getByRole("button", { name: "重新解析" }).click();
   await expect(page.getByText("主模型已完成解析")).toBeVisible();
   await page.getByLabel("金额").fill("12.60");
-  await page.getByLabel("交易时间").fill("2026-07-13T09:45");
+  await page.getByLabel("记账时间").fill("2026-07-13T09:45");
   await page.getByRole("button", { name: "确认入账" }).click();
   await expect.poll(() => captured.create?.amount_cents).toBe(1260);
   expect(captured.create?.occurred_at).toBe("2026-07-13T09:45:00+08:00");
@@ -171,7 +171,7 @@ test("quick entry invalidates stale AI draft, saves edited time, and can cancel 
   await page.getByRole("button", { name: /^流水/ }).click();
   await page.getByRole("button", { name: "编辑夜间咖啡" }).click();
   await expect(page.getByText("正在编辑：夜间咖啡")).toBeVisible();
-  await expect(page.getByLabel("交易时间")).toHaveValue("2026-07-11T20:30");
+  await expect(page.getByLabel("记账时间")).toHaveValue("2026-07-11T20:30");
   await page.getByRole("button", { name: "取消编辑" }).click();
   await expect(page.getByRole("heading", { name: "确认入账", exact: true })).toBeVisible();
   expect(captured.updates).toBe(0);
@@ -243,6 +243,33 @@ test("desktop and mobile keep all six views within the viewport", async ({ page 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   await page.getByRole("button", { name: /^分析/ }).click();
+
+  const trendChart = page.locator(".chart-panel .recharts-wrapper");
+  const chartBounds = await trendChart.boundingBox();
+  expect(chartBounds).not.toBeNull();
+  await page.mouse.move(
+    chartBounds!.x + chartBounds!.width / 2,
+    chartBounds!.y + chartBounds!.height / 2,
+  );
+  const trendTooltip = page.locator(".chart-panel .recharts-default-tooltip");
+  await expect(trendTooltip).toBeVisible();
+  await expect(trendTooltip).toContainText("2026年7月1日");
+  await expect(trendTooltip).toContainText("支出");
+  await expect(trendTooltip).not.toContainText("expense_cents");
+
+  const firstPie = page.locator(".mini-pie").first();
+  await page.waitForTimeout(900);
+  const pieBounds = await firstPie.locator(".recharts-wrapper").boundingBox();
+  expect(pieBounds).not.toBeNull();
+  await page.mouse.move(
+    pieBounds!.x + pieBounds!.width / 2 + 58,
+    pieBounds!.y + pieBounds!.height / 2,
+  );
+  const pieTooltip = firstPie.locator(".recharts-default-tooltip");
+  await expect(pieTooltip).toBeVisible();
+  await expect(pieTooltip).toContainText("饮品");
+  await expect(pieTooltip).not.toContainText("amount_cents");
+
   const legendStyles = await page.locator(".pie-legend span").evaluateAll((items) =>
     items.map((item) => getComputedStyle(item).whiteSpace),
   );

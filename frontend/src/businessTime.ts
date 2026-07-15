@@ -32,20 +32,20 @@ export function apiIsoToDateTimeLocal(value: string): string {
   if (!trimmed) return "";
   if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(trimmed)) {
     const localMatch = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(trimmed);
-    if (!localMatch) throw new Error("交易时间格式不正确");
+    if (!localMatch) throw new Error("记账时间格式不正确");
     return `${localMatch[1]}T${localMatch[2]}`;
   }
   const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) throw new Error("交易时间格式不正确");
+  if (Number.isNaN(parsed.getTime())) throw new Error("记账时间格式不正确");
   return currentBusinessDateTimeLocal(parsed);
 }
 
 export function dateTimeLocalToApiIso(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
-  if (!match) throw new Error("请选择完整的交易时间");
+  if (!match) throw new Error("请选择完整的记账时间");
   const [, year, month, day, hour, minute] = match;
   const probe = new Date(`${year}-${month}-${day}T${hour}:${minute}:00+08:00`);
-  if (Number.isNaN(probe.getTime())) throw new Error("交易时间格式不正确");
+  if (Number.isNaN(probe.getTime())) throw new Error("记账时间格式不正确");
   return `${year}-${month}-${day}T${hour}:${minute}:00+08:00`;
 }
 

@@ -1174,10 +1174,24 @@ function AnalyticsPage({
                 </linearGradient>
               </defs>
               <CartesianGrid stroke="#cfd8dc" strokeDasharray="2 8" vertical={false} />
-              <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#65717a", fontSize: 11 }} />
-              <YAxis tickLine={false} axisLine={false} tick={{ fill: "#65717a", fontSize: 11 }} tickFormatter={(value) => `${Number(value) / 100}`} />
-              <Tooltip formatter={(value) => `¥${centsToYuan(Number(value))}`} />
-              <Area type="monotone" dataKey="expense_cents" stroke="#276f79" fill="url(#expenseGradient)" strokeWidth={2.5} />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: "#65717a", fontSize: 11 }}
+                tickFormatter={(value) => formatChartDateShort(String(value))}
+              />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                tick={{ fill: "#65717a", fontSize: 11 }}
+                tickFormatter={(value) => `¥${centsToYuan(Number(value))}`}
+              />
+              <Tooltip
+                labelFormatter={(label) => formatChartDate(String(label))}
+                formatter={(value) => [`¥${centsToYuan(Number(value))}`, "支出"]}
+              />
+              <Area name="支出" type="monotone" dataKey="expense_cents" stroke="#276f79" fill="url(#expenseGradient)" strokeWidth={2.5} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -1584,7 +1598,7 @@ function fieldDisplayName(field: string): string {
     type: "收支类型",
     category: "分类",
     account: "账户",
-    occurred_at: "时间",
+    occurred_at: "记账时间",
     note: "备注",
   };
   return labels[field] || field;
@@ -1645,7 +1659,7 @@ function TransactionForm({
       setOccurredAtError("");
     } catch (error) {
       setOccurredAtText("");
-      setOccurredAtError(error instanceof Error ? error.message : "交易时间格式不正确");
+      setOccurredAtError(error instanceof Error ? error.message : "记账时间格式不正确");
     }
   }, [draft.occurred_at, draft.raw_text, editingId]);
 
@@ -1680,7 +1694,7 @@ function TransactionForm({
       setOccurredAtError("");
       update("occurred_at", apiValue);
     } catch (error) {
-      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的交易时间");
+      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的记账时间");
     }
   };
 
@@ -1698,7 +1712,7 @@ function TransactionForm({
       setOccurredAtError("");
       onSave({ ...draft, amount_cents: amountCents, occurred_at: occurredAt });
     } catch (error) {
-      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的交易时间");
+      setOccurredAtError(error instanceof Error ? error.message : "请选择完整的记账时间");
     }
   };
   const addTag = () => {
@@ -1748,7 +1762,7 @@ function TransactionForm({
         </select>
       </label>
       <label className="field-block wide">
-        <span>交易时间</span>
+        <span>记账时间</span>
         <input
           type="datetime-local"
           step="60"
@@ -1822,7 +1836,7 @@ function MiniPie({ title, data }: { title: string; data: Array<{ name: string; a
                 <Pie data={data} dataKey="amount_cents" nameKey="name" innerRadius={44} outerRadius={72} paddingAngle={2}>
                   {data.map((entry, index) => <Cell key={entry.name} fill={pieColors[index % pieColors.length]} />)}
                 </Pie>
-                <Tooltip formatter={(value) => `¥${centsToYuan(Number(value))}`} />
+                <Tooltip formatter={(value, name) => [`¥${centsToYuan(Number(value))}`, String(name || "金额")]} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -1891,6 +1905,18 @@ function formatDay(date: string) {
     day: "numeric",
     weekday: "short",
   }).format(new Date(`${date}T00:00:00`));
+}
+
+function formatChartDate(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  return `${Number(match[1])}年${Number(match[2])}月${Number(match[3])}日`;
+}
+
+function formatChartDateShort(date: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return date;
+  return `${Number(match[2])}月${Number(match[3])}日`;
 }
 
 export default App;
