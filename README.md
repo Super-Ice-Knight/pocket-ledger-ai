@@ -213,26 +213,6 @@ npm test
 
 完整发布检查见 [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)。
 
-## 三分钟演示
-
-1. 总览：现金流、预算状态，并手动生成一次带 provider 标记的 AI 点评。
-2. AI 快记：输入自然语言，检查结构化草稿与来源。
-3. 确认入账：强调 AI 不直接写库。
-4. 流水与分析：切换月度/周度统计，展示日期分组、标签、图表和文字结论。
-5. 设置：展示 Groq 主模型测试和公开演示只读边界。
-6. 工程说明：整数分、SQLite、点评指纹缓存、可选 Provider 容灾和本地规则。
-
-录制前预热步骤与逐段讲稿见 [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)。
-
-## 答辩资料
-
-- [AI 协同开发日志](AI_LOG.md)
-- [产品规格](docs/PRODUCT_SPEC.md)
-- [API 契约](docs/API_SPEC.md)
-- [部署说明](docs/DEPLOYMENT.md)
-- [答辩备忘](docs/DEFENSE_NOTES.md)
-- [开发流水](docs/DEV_LOG.md)
-
 ## 数据与安全边界
 
 - 第一版为单用户演示，不包含登录和多用户权限。
