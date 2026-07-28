@@ -38,13 +38,11 @@
 
 ## 2026-07-08
 
-- 进入交付整理阶段：优先处理部署、GitHub 发布、演示脚本和评审入口，而不是继续扩展语音、App 或 OCR。
+- 进入交付整理阶段：优先处理部署、GitHub 发布和评审入口，而不是继续扩展语音、App 或 OCR。
 - 将后端 CORS 从硬编码本地地址改为 `CORS_ALLOWED_ORIGINS` 环境变量，解决前后端分离线上部署后常见的 `Failed to fetch`。
 - 新增 `render.yaml` 作为 Render 后端部署参考，SQLite 线上演示建议挂载持久磁盘并将数据库路径设为 `/var/data/pocket_ledger.db`。
 - 新增 `frontend/vercel.json`，支持 Vercel 静态站点的 SPA 刷新回退。
-- 重写 README 为评审入口，补充核心功能、运行方式、AI 配置、测试、演示流程和部署入口。
-- 新增 `docs/DEMO_SCRIPT.md`，把 3 分钟演示拆成项目定位、快记、流水、预算、设置和工程边界。
-- 新增 `docs/RELEASE_CHECKLIST.md`，用于发布前检查测试、构建、安全、GitHub 和线上验证。
+- 重写 README 为评审入口，补充核心功能、运行方式、AI 配置、测试和部署入口。
 
 ## 2026-07-12
 
@@ -59,7 +57,7 @@
 - AI 点评展示真实主模型、备用模型、本地规则或失败兜底来源。
 - 流水删除增加确认对话框和错误处理。
 - 手机端改为紧凑品牌栏、独立设置入口和五项底部导航；390×844 首屏可完成一句话解析。
-- README、AI_LOG、DEFENSE_NOTES、DEMO_SCRIPT、DEPLOYMENT 和发布检查表进入最终事实同步。
+- README、AI_LOG、DEPLOYMENT 和其余公开工程文档进入最终事实同步。
 
 ## 2026-07-13
 
