@@ -104,7 +104,7 @@ AI 点评不跟随页面加载、普通刷新或每次入账自动调用模型�
 frontend/              React 前端
 backend/app/           FastAPI、SQLite、AI 与统计逻辑
 backend/tests/         后端行为测试
-docs/                  产品、接口、部署、演示与答辩文档
+docs/                  部署说明与 README 界面截图
 AI_LOG.md              AI 协同开发日志
 render.yaml            Render 部署配置
 ```
