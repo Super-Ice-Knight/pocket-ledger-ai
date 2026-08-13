@@ -152,11 +152,15 @@ npm ci
 npm run dev
 ```
 
-默认访问 `http://127.0.0.1:5173`。如果后端运行在其他端口，在 `frontend/.env.local` 中设置：
+默认访问 `http://127.0.0.1:5173`。前端在没有 `frontend/.env.local` 时会自动连接 `http://localhost:8000`，与上面的后端启动命令一致，因此全新 clone 后无需额外创建前端环境变量文件。
+
+只有当你手动修改了后端端口时，才需要在 `frontend/.env.local` 中填写后端实际地址。例如后端仍运行在默认的 `8000` 端口时应写为：
 
 ```env
-VITE_API_BASE_URL=http://127.0.0.1:8001
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
+
+若把后端改为其他端口，`VITE_API_BASE_URL` 必须同步使用同一个端口；修改后需要重启 `npm run dev`。不要在后端运行于 `8000` 时把这里写成 `8001`。
 
 ## AI 配置
 
